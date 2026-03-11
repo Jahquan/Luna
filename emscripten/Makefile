@@ -4,8 +4,7 @@ EMFLAGS := -s WASM=1 -s MODULARIZE=1 -s EXPORT_ES6=1 -s EXPORT_NAME="'WebLuna'" 
 
 CPPFLAGS += -I../third_party/expat -I../third_party/expat/lib
 CFLAGS  += -O3 -flto -W -Wall -Wextra -DNOCRYPT -DUSE_FILE32API -Wno-unused-parameter
-CFLAGS += -s USE_ZLIB=1
-LFLAGS := -flto $(EMFLAGS)
+LFLAGS := -flto -s USE_ZLIB=1 $(EMFLAGS)
 
 VPATH   = ../ ../minizip-1.1 ../third_party/expat/lib
 
@@ -21,7 +20,7 @@ all: wasm
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
 
 $(OUTPUT).js: $(OBJS)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(LFLAGS) $^ -o $@
+	$(CC) $(LFLAGS) $^ -o $@
 
 clean:
 	$(RM) -f $(OBJS) $(OUTPUT).js* $(OUTPUT).was*

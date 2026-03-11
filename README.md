@@ -6,6 +6,17 @@ Lua scripts require OS 3.0.2 or later, and Python scripts require CX II OS 5.2 o
 
 It can also be used to convert any TI-Nspire problems in XML format to TNS documents.
 
+## Project status
+
+This repository is a maintained fork of the original [ndless-nspire/Luna](https://github.com/ndless-nspire/Luna) project.
+The goal of this fork is to preserve Luna's core TNS conversion behavior while modernizing the project around it:
+
+* keep the original converter and TI-Nspire format behavior intact
+* make the CLI safer and less surprising
+* add regression tests and CI so changes are verifiable
+* keep a working Emscripten/browser build
+* document the project as it exists now, not as it existed years ago
+
 ## What this fork adds
 
 This fork keeps Luna's core conversion behavior intact while modernizing the project around it:
@@ -16,6 +27,41 @@ This fork keeps Luna's core conversion behavior intact while modernizing the pro
 * improved XML parsing and diagnostics via a vendored Expat backend
 * regression tests, sanitizer runs, and GitHub Actions coverage for native builds
 * a richer browser UI for the Emscripten build, including folder upload and drag-and-drop
+
+## Modernization summary
+
+### Converter and CLI
+
+* Added `--help` and `--version`
+* Single-file conversions now default to writing the `.tns` beside the source file
+* A bare explicit output name like `notes.tns` in single-file mode is also resolved beside the source file
+* Successful conversions print the final output path that was written
+* Output writes now go through a temp file before final replacement
+* Recursive directory mode converts every `.py` file in place and prints a converted/failed/skipped summary
+* Recursive traversal is deterministic and skips symlink loops
+
+### XML and Python metadata handling
+
+* Replaced the ad hoc XML parser with a vendored Expat-backed parser
+* Added support for XML comments, self-closing tags, and processing instructions in the conversion path
+* XML failures now report clearer line and column information
+* Embedded Python filenames are escaped and Unicode-safe before insertion into generated XML metadata
+
+### Tooling and verification
+
+* Added a real regression suite with fixtures and stable output hashes
+* Added `make test` and `make sanitize`
+* Added Linux/macOS CI, Windows CI, and Emscripten CI workflows
+* Vendored Expat into `third_party/expat`
+* Cleaned remaining web-build warnings so the Emscripten build is clean
+
+### Web build
+
+* Added multi-file bundle mode for `.lua`, `.py`, `.xml`, and `.bmp`
+* Added recursive Python folder conversion in the browser
+* Added drag-and-drop for files and supported folders
+* Added an in-page run log, selection previews, status cards, and download list
+* Verified the browser bundle builds with `emcc`
 
 ## Features
 
@@ -62,6 +108,12 @@ luna worksheets/
 
 # XML problem/document bundle with a BMP resource
 luna Document.xml Problem1.xml image.bmp worksheet.tns
+
+# Build and serve the browser UI locally
+source ~/Downloads/emsdk/emsdk_env.sh
+make -C emscripten
+cd emscripten
+python3 -m http.server 8000
 ```
 
 ## Bugs, feedback...
@@ -83,6 +135,12 @@ The XML parser is vendored from Expat 2.7.4 under `third_party/expat`, so there 
 Run `make test` to execute the regression checks.
 Run `make sanitize` to exercise the converter under AddressSanitizer and UBSan.
 Run `make -C emscripten` to build the browser bundle when `emcc` is installed. The web UI supports bundling selected files into one `.tns`, uploading a folder to recursively convert every `.py` file in place, drag-and-drop for files/folders, and an in-page run log plus download list.
+
+On macOS, if `emcc` comes from a home-directory `emsdk` install, activate it first:
+
+```sh
+source ~/Downloads/emsdk/emsdk_env.sh
+```
 
 ## Web UI
 
@@ -114,12 +172,23 @@ Native verification is driven by [tests/test_cli.sh](tests/test_cli.sh), which e
 * BMP resource packing
 * XML comments, self-closing tags, processing instructions, and failure paths
 * stdin Lua conversion
+* malformed XML and non-clobbering failure behavior
 
 GitHub Actions coverage lives in:
 
 * `.github/workflows/ci.yml` for Linux/macOS build and sanitizer runs
 * `.github/workflows/windows.yml` for Windows build and test runs
 * `.github/workflows/emscripten.yml` for web bundle builds
+
+Recommended local verification commands:
+
+```sh
+make
+make test
+make sanitize
+source ~/Downloads/emsdk/emsdk_env.sh
+make -C emscripten
+```
 
 ## History
 

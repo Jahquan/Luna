@@ -45,9 +45,15 @@
 #include "zlib.h"
 
 #if defined(USE_FILE32API)
+#ifndef fopen64
 #define fopen64 fopen
+#endif
+#ifndef ftello64
 #define ftello64 ftell
+#endif
+#ifndef fseeko64
 #define fseeko64 fseek
+#endif
 #else
 #ifdef _MSC_VER
  #define fopen64 fopen
