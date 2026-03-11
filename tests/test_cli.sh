@@ -32,6 +32,19 @@ python_cmd() {
 	fi
 }
 
+copy_fixture() {
+	src=$1
+	dst=$2
+	cp "$src" "$dst"
+	"$(python_cmd)" - <<'PY' "$dst"
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+path.write_bytes(path.read_bytes().replace(b"\r\n", b"\n"))
+PY
+}
+
 assert_file() {
 	if [ ! -f "$1" ]; then
 		echo "missing expected file: $1" >&2
@@ -105,8 +118,8 @@ version_output=$(normalize_output "$version_output")
 [ "$version_output" = "Luna v2.1" ]
 
 mkdir "$TMPDIR/explicit-python"
-cp "$ROOT_DIR/tests/fixtures/main.py" "$TMPDIR/explicit-python/main.py"
-cp "$ROOT_DIR/tests/fixtures/helper.py" "$TMPDIR/explicit-python/helper.py"
+copy_fixture "$ROOT_DIR/tests/fixtures/main.py" "$TMPDIR/explicit-python/main.py"
+copy_fixture "$ROOT_DIR/tests/fixtures/helper.py" "$TMPDIR/explicit-python/helper.py"
 "$BIN" "$TMPDIR/explicit-python/main.py" "$TMPDIR/explicit-python/helper.py" "$TMPDIR/explicit-python/out.tns" >/dev/null
 assert_file "$TMPDIR/explicit-python/out.tns"
 assert_contains "$TMPDIR/explicit-python/out.tns" "Document.xml"
@@ -116,7 +129,7 @@ assert_contains "$TMPDIR/explicit-python/out.tns" "helper.py"
 assert_manifest_hash "$TMPDIR/explicit-python/out.tns" "$MULTI_PY_MANIFEST_HASH"
 
 mkdir "$TMPDIR/implicit-python"
-cp "$ROOT_DIR/tests/fixtures/main.py" "$TMPDIR/implicit-python/main.py"
+copy_fixture "$ROOT_DIR/tests/fixtures/main.py" "$TMPDIR/implicit-python/main.py"
 "$BIN" "$TMPDIR/implicit-python/main.py" >/dev/null
 assert_file "$TMPDIR/implicit-python/main.tns"
 assert_manifest_hash "$TMPDIR/implicit-python/main.tns" "$SINGLE_PY_MANIFEST_HASH"
@@ -132,20 +145,20 @@ if [ -f "$ROOT_DIR/renamed.tns" ]; then
 fi
 
 mkdir "$TMPDIR/spaced-filename"
-cp "$ROOT_DIR/tests/fixtures/main.py" "$TMPDIR/spaced-filename/notes with spaces.py"
+copy_fixture "$ROOT_DIR/tests/fixtures/main.py" "$TMPDIR/spaced-filename/notes with spaces.py"
 rm -f "$ROOT_DIR/space output.tns"
 (cd "$ROOT_DIR" && "$BIN" "$TMPDIR/spaced-filename/notes with spaces.py" "space output.tns" >/dev/null)
 assert_file "$TMPDIR/spaced-filename/space output.tns"
 assert_missing "$ROOT_DIR/space output.tns"
 
 mkdir "$TMPDIR/escaped-filename"
-cp "$ROOT_DIR/tests/fixtures/main.py" "$TMPDIR/escaped-filename/amp&name space.py"
+copy_fixture "$ROOT_DIR/tests/fixtures/main.py" "$TMPDIR/escaped-filename/amp&name space.py"
 "$BIN" "$TMPDIR/escaped-filename/amp&name space.py" >/dev/null
 assert_file "$TMPDIR/escaped-filename/amp&name space.tns"
 
 mkdir -p "$TMPDIR/recursive-python/sub/deeper"
-cp "$ROOT_DIR/tests/fixtures/main.py" "$TMPDIR/recursive-python/main.py"
-cp "$ROOT_DIR/tests/fixtures/main.py" "$TMPDIR/recursive-python/sub/deeper/main.py"
+copy_fixture "$ROOT_DIR/tests/fixtures/main.py" "$TMPDIR/recursive-python/main.py"
+copy_fixture "$ROOT_DIR/tests/fixtures/main.py" "$TMPDIR/recursive-python/sub/deeper/main.py"
 printf 'ignore me\n' > "$TMPDIR/recursive-python/sub/deeper/notes.txt"
 recursive_skipped=1
 if ln -s "$TMPDIR/recursive-python/main.py" "$TMPDIR/recursive-python/sub/link.py" 2>/dev/null \
@@ -194,7 +207,7 @@ assert_contains "$TMPDIR/resource/pixel.tns" "*TIMLP0700"
 assert_contains "$TMPDIR/resource/pixel.tns" "pixel.bmp"
 
 mkdir "$TMPDIR/xml-bmp-bundle"
-cp "$ROOT_DIR/tests/fixtures/Problem1.xml" "$TMPDIR/xml-bmp-bundle/Problem1.xml"
+copy_fixture "$ROOT_DIR/tests/fixtures/Problem1.xml" "$TMPDIR/xml-bmp-bundle/Problem1.xml"
 cp "$TMPDIR/resource/pixel.bmp" "$TMPDIR/xml-bmp-bundle/pixel.bmp"
 "$BIN" "$TMPDIR/xml-bmp-bundle/Problem1.xml" "$TMPDIR/xml-bmp-bundle/pixel.bmp" "$TMPDIR/xml-bmp-bundle/bundle.tns" >/dev/null
 assert_file "$TMPDIR/xml-bmp-bundle/bundle.tns"
@@ -204,7 +217,7 @@ assert_contains "$TMPDIR/xml-bmp-bundle/bundle.tns" "pixel.bmp"
 assert_contains "$TMPDIR/xml-bmp-bundle/bundle.tns" "*TIMLP0700"
 
 mkdir "$TMPDIR/problem"
-cp "$ROOT_DIR/tests/fixtures/Problem1.xml" "$TMPDIR/problem/Problem1.xml"
+copy_fixture "$ROOT_DIR/tests/fixtures/Problem1.xml" "$TMPDIR/problem/Problem1.xml"
 "$BIN" "$TMPDIR/problem/Problem1.xml" "$TMPDIR/problem/problem.tns" >/dev/null
 assert_file "$TMPDIR/problem/problem.tns"
 assert_contains "$TMPDIR/problem/problem.tns" "Problem1.xml"
