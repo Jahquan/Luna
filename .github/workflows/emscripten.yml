@@ -15,6 +15,11 @@ jobs:
     - name: Checkout Git Repo
       uses: actions/checkout@v5
 
+    - name: Install build deps
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y zlib1g-dev
+
     - name: Install Emscripten SDK
       shell: bash
       run: |
