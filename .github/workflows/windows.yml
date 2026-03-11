@@ -11,22 +11,34 @@ on:
 jobs:
   build:
     runs-on: windows-2022
-    env:
-      MSYSTEM: MINGW64
     steps:
     - name: Checkout Git Repo
       uses: actions/checkout@v5
 
-    - name: Fixup PATH
-      run: |
-        echo "C:/msys64/mingw64/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-        echo "C:/msys64/usr/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+    - name: Setup MSYS2
+      uses: msys2/setup-msys2@v2
+      with:
+        msystem: MINGW64
+        update: true
+        install: >-
+          make
+          diffutils
+          coreutils
+          grep
+          gawk
+          findutils
+          python
+          perl
+          mingw-w64-x86_64-gcc
+          mingw-w64-x86_64-zlib
 
     - name: Build
+      shell: msys2 {0}
       run: |
         mingw32-make -j4 CC=gcc
 
     - name: Test
+      shell: msys2 {0}
       run: |
         mingw32-make CC=gcc test
 
