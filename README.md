@@ -13,7 +13,7 @@ The goal of this fork is to preserve Luna's core TNS conversion behavior while m
 
 * keep the original converter and TI-Nspire format behavior intact
 * make the CLI safer and less surprising
-* add regression tests and CI so changes are verifiable
+* add regression tests so changes are verifiable
 * keep a working Emscripten/browser build
 * document the project as it exists now, not as it existed years ago
 
@@ -25,7 +25,7 @@ This fork keeps Luna's core conversion behavior intact while modernizing the pro
 * same-directory output for single-file conversions, even when you pass a bare `OUTFILE.tns`
 * recursive Python directory conversion with deterministic traversal and symlink skipping
 * improved XML parsing and diagnostics via a vendored Expat backend
-* regression tests, sanitizer runs, and GitHub Actions coverage for native builds
+* regression tests and sanitizer runs for native builds
 * a richer browser UI for the Emscripten build, including folder upload and drag-and-drop
 
 ## Modernization summary
@@ -51,7 +51,6 @@ This fork keeps Luna's core conversion behavior intact while modernizing the pro
 
 * Added a real regression suite with fixtures and stable output hashes
 * Added `make test` and `make sanitize`
-* Added Linux/macOS CI, Windows CI, and Emscripten CI workflows
 * Vendored Expat into `third_party/expat`
 * Cleaned remaining web-build warnings so the Emscripten build is clean
 
@@ -163,7 +162,7 @@ The browser UI supports:
 * an in-page stdout/stderr log from Luna
 * a download list for generated `.tns` files
 
-## Verification and CI
+## Verification
 
 Native verification is driven by [tests/test_cli.sh](tests/test_cli.sh), which exercises:
 
@@ -175,11 +174,7 @@ Native verification is driven by [tests/test_cli.sh](tests/test_cli.sh), which e
 * stdin Lua conversion
 * malformed XML and non-clobbering failure behavior
 
-GitHub Actions coverage lives in:
-
-* `.github/workflows/ci.yml` for Linux/macOS build and sanitizer runs
-* `.github/workflows/windows.yml` for Windows build and test runs
-* `.github/workflows/emscripten.yml` for web bundle builds
+This fork does not use CI/CD workflows. Verification is expected to be run locally before changes are committed or published.
 
 Recommended local verification commands:
 
