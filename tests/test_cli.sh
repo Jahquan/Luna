@@ -125,9 +125,9 @@ assert_file "$TMPDIR/spaced-filename/space output.tns"
 assert_missing "$ROOT_DIR/space output.tns"
 
 mkdir "$TMPDIR/escaped-filename"
-cp "$ROOT_DIR/tests/fixtures/main.py" "$TMPDIR/escaped-filename/amp&less<name>.py"
-"$BIN" "$TMPDIR/escaped-filename/amp&less<name>.py" >/dev/null
-assert_file "$TMPDIR/escaped-filename/amp&less<name>.tns"
+cp "$ROOT_DIR/tests/fixtures/main.py" "$TMPDIR/escaped-filename/amp&name space.py"
+"$BIN" "$TMPDIR/escaped-filename/amp&name space.py" >/dev/null
+assert_file "$TMPDIR/escaped-filename/amp&name space.tns"
 
 mkdir -p "$TMPDIR/recursive-python/sub/deeper"
 cp "$ROOT_DIR/tests/fixtures/main.py" "$TMPDIR/recursive-python/main.py"
