@@ -6,6 +6,32 @@ BIN=${1:-./luna}
 ROOT_DIR=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 . "$ROOT_DIR/tests/expected_hashes.sh"
 
+if [ ! -x "$BIN" ] && [ -x "$BIN.exe" ]; then
+	BIN="$BIN.exe"
+fi
+
+sha256_file() {
+	if command -v sha256sum >/dev/null 2>&1; then
+		sha256sum "$1" | awk '{print $1}'
+	elif command -v shasum >/dev/null 2>&1; then
+		shasum -a 256 "$1" | awk '{print $1}'
+	else
+		echo "no SHA-256 tool found" >&2
+		exit 1
+	fi
+}
+
+python_cmd() {
+	if command -v python3 >/dev/null 2>&1; then
+		printf '%s\n' python3
+	elif command -v python >/dev/null 2>&1; then
+		printf '%s\n' python
+	else
+		echo "no Python interpreter found" >&2
+		exit 1
+	fi
+}
+
 assert_file() {
 	if [ ! -f "$1" ]; then
 		echo "missing expected file: $1" >&2
@@ -14,7 +40,7 @@ assert_file() {
 }
 
 assert_hash() {
-	actual=$(shasum -a 256 "$1" | awk '{print $1}')
+	actual=$(sha256_file "$1")
 	if [ "$actual" != "$2" ]; then
 		echo "unexpected hash for $1" >&2
 		echo "expected: $2" >&2
@@ -44,7 +70,8 @@ assert_output_contains() {
 	fi
 }
 
-TMPDIR=$(mktemp -d "${TMPDIR:-/tmp}/luna-test.XXXXXX")
+TMP_BASE=${TMPDIR:-${TEMP:-${TMP:-/tmp}}}
+TMPDIR=$(mktemp -d "$TMP_BASE/luna-test.XXXXXX")
 trap 'rm -rf "$TMPDIR"' EXIT INT TERM
 
 help_output=$("$BIN" --help)
@@ -127,7 +154,7 @@ assert_output_contains "$empty_output" "recursive conversion summary: converted 
 assert_output_contains "$empty_output" "no Python files found to convert"
 
 mkdir "$TMPDIR/resource"
-python3 - <<'PY' "$TMPDIR/resource/pixel.bmp"
+"$(python_cmd)" - <<'PY' "$TMPDIR/resource/pixel.bmp"
 import pathlib
 import sys
 
