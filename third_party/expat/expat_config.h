@@ -131,6 +131,15 @@
 /* Define to make XML Namespaces functionality available. */
 #define XML_NS 1
 
+#if defined(__EMSCRIPTEN__)
+/* Emscripten does not provide the native entropy APIs detected for macOS. */
+# undef HAVE_ARC4RANDOM_BUF
+# undef HAVE_GETRANDOM
+# undef HAVE_SYSCALL_GETRANDOM
+# undef XML_DEV_URANDOM
+# define XML_POOR_ENTROPY 1
+#endif
+
 /* Define to empty if 'const' does not conform to ANSI C. */
 /* #undef const */
 
