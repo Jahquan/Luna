@@ -161,9 +161,13 @@ copy_fixture "$ROOT_DIR/tests/fixtures/main.py" "$TMPDIR/recursive-python/main.p
 copy_fixture "$ROOT_DIR/tests/fixtures/main.py" "$TMPDIR/recursive-python/sub/deeper/main.py"
 printf 'ignore me\n' > "$TMPDIR/recursive-python/sub/deeper/notes.txt"
 recursive_skipped=1
-if ln -s "$TMPDIR/recursive-python/main.py" "$TMPDIR/recursive-python/sub/link.py" 2>/dev/null \
-	&& ln -s "$TMPDIR/recursive-python" "$TMPDIR/recursive-python/sub/loop-dir" 2>/dev/null; then
-	recursive_skipped=3
+ln -s "$TMPDIR/recursive-python/main.py" "$TMPDIR/recursive-python/sub/link.py" 2>/dev/null || true
+if [ -L "$TMPDIR/recursive-python/sub/link.py" ]; then
+	recursive_skipped=$((recursive_skipped + 1))
+fi
+ln -s "$TMPDIR/recursive-python" "$TMPDIR/recursive-python/sub/loop-dir" 2>/dev/null || true
+if [ -L "$TMPDIR/recursive-python/sub/loop-dir" ]; then
+	recursive_skipped=$((recursive_skipped + 1))
 fi
 recursive_output=$("$BIN" "$TMPDIR/recursive-python")
 recursive_output=$(normalize_output "$recursive_output")
