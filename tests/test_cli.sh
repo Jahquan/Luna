@@ -49,6 +49,20 @@ assert_hash() {
 	fi
 }
 
+archive_manifest_hash() {
+	"$(python_cmd)" "$ROOT_DIR/tests/tns_manifest.py" "$1"
+}
+
+assert_manifest_hash() {
+	actual=$(archive_manifest_hash "$1")
+	if [ "$actual" != "$2" ]; then
+		echo "unexpected archive manifest hash for $1" >&2
+		echo "expected: $2" >&2
+		echo "actual:   $actual" >&2
+		exit 1
+	fi
+}
+
 assert_contains() {
 	if ! strings "$1" | grep -Fq "$2"; then
 		echo "expected to find '$2' in $1" >&2
@@ -99,19 +113,19 @@ assert_contains "$TMPDIR/explicit-python/out.tns" "Document.xml"
 assert_contains "$TMPDIR/explicit-python/out.tns" "Problem1.xml"
 assert_contains "$TMPDIR/explicit-python/out.tns" "main.py"
 assert_contains "$TMPDIR/explicit-python/out.tns" "helper.py"
-assert_hash "$TMPDIR/explicit-python/out.tns" "$MULTI_PY_HASH"
+assert_manifest_hash "$TMPDIR/explicit-python/out.tns" "$MULTI_PY_MANIFEST_HASH"
 
 mkdir "$TMPDIR/implicit-python"
 cp "$ROOT_DIR/tests/fixtures/main.py" "$TMPDIR/implicit-python/main.py"
 "$BIN" "$TMPDIR/implicit-python/main.py" >/dev/null
 assert_file "$TMPDIR/implicit-python/main.tns"
-assert_hash "$TMPDIR/implicit-python/main.tns" "$SINGLE_PY_HASH"
+assert_manifest_hash "$TMPDIR/implicit-python/main.tns" "$SINGLE_PY_MANIFEST_HASH"
 "$BIN" "$TMPDIR/implicit-python/main.py" "$TMPDIR/implicit-python/explicit.tns" >/dev/null
 cmp -s "$TMPDIR/implicit-python/main.tns" "$TMPDIR/implicit-python/explicit.tns"
 rm -f "$ROOT_DIR/renamed.tns"
 (cd "$ROOT_DIR" && "$BIN" "$TMPDIR/implicit-python/main.py" renamed.tns >/dev/null)
 assert_file "$TMPDIR/implicit-python/renamed.tns"
-assert_hash "$TMPDIR/implicit-python/renamed.tns" "$SINGLE_PY_HASH"
+assert_manifest_hash "$TMPDIR/implicit-python/renamed.tns" "$SINGLE_PY_MANIFEST_HASH"
 if [ -f "$ROOT_DIR/renamed.tns" ]; then
 	echo "single-file relative output should not be created in the current directory" >&2
 	exit 1
@@ -141,9 +155,9 @@ fi
 recursive_output=$("$BIN" "$TMPDIR/recursive-python")
 recursive_output=$(normalize_output "$recursive_output")
 assert_file "$TMPDIR/recursive-python/main.tns"
-assert_hash "$TMPDIR/recursive-python/main.tns" "$SINGLE_PY_HASH"
+assert_manifest_hash "$TMPDIR/recursive-python/main.tns" "$SINGLE_PY_MANIFEST_HASH"
 assert_file "$TMPDIR/recursive-python/sub/deeper/main.tns"
-assert_hash "$TMPDIR/recursive-python/sub/deeper/main.tns" "$SINGLE_PY_HASH"
+assert_manifest_hash "$TMPDIR/recursive-python/sub/deeper/main.tns" "$SINGLE_PY_MANIFEST_HASH"
 assert_missing "$TMPDIR/recursive-python/sub/deeper/notes.tns"
 assert_output_contains "$recursive_output" "recursive conversion summary: converted 2, failed 0, skipped $recursive_skipped"
 if [ "$recursive_skipped" -gt 1 ]; then
@@ -194,7 +208,7 @@ cp "$ROOT_DIR/tests/fixtures/Problem1.xml" "$TMPDIR/problem/Problem1.xml"
 "$BIN" "$TMPDIR/problem/Problem1.xml" "$TMPDIR/problem/problem.tns" >/dev/null
 assert_file "$TMPDIR/problem/problem.tns"
 assert_contains "$TMPDIR/problem/problem.tns" "Problem1.xml"
-assert_hash "$TMPDIR/problem/problem.tns" "$PROBLEM_XML_HASH"
+assert_manifest_hash "$TMPDIR/problem/problem.tns" "$PROBLEM_XML_MANIFEST_HASH"
 
 mkdir "$TMPDIR/xml-comment"
 cat <<'EOF' > "$TMPDIR/xml-comment/Problem1.xml"
@@ -241,7 +255,7 @@ fi
 invalid_output=$(normalize_output "$invalid_output")
 assert_output_contains "$invalid_output" "$TMPDIR/xml-invalid/Problem1.xml"
 assert_output_contains "$invalid_output" "line 2 column"
-assert_hash "$TMPDIR/xml-invalid/invalid.tns" "$PROBLEM_XML_HASH"
+assert_manifest_hash "$TMPDIR/xml-invalid/invalid.tns" "$PROBLEM_XML_MANIFEST_HASH"
 
 mkdir "$TMPDIR/xml-doctype"
 cat <<'EOF' > "$TMPDIR/xml-doctype/Problem1.xml"
@@ -260,7 +274,7 @@ assert_missing "$TMPDIR/xml-doctype/doctype.tns"
 mkdir "$TMPDIR/stdin-lua"
 printf 'print("stdin lua")\n' | "$BIN" - "$TMPDIR/stdin-lua/stdin.tns" >/dev/null
 assert_file "$TMPDIR/stdin-lua/stdin.tns"
-assert_hash "$TMPDIR/stdin-lua/stdin.tns" "$STDIN_LUA_HASH"
+assert_manifest_hash "$TMPDIR/stdin-lua/stdin.tns" "$STDIN_LUA_MANIFEST_HASH"
 
 if printf 'print("stdin lua")\n' | "$BIN" - >/dev/null 2>&1; then
 	echo "stdin conversion without an explicit output path should fail" >&2
