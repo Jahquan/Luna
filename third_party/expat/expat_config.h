@@ -140,6 +140,14 @@
 # define XML_POOR_ENTROPY 1
 #endif
 
+#if defined(_WIN32)
+/* The vendored config is derived from a Unix host and must be pared back. */
+# undef HAVE_ARC4RANDOM_BUF
+# undef HAVE_GETRANDOM
+# undef HAVE_SYSCALL_GETRANDOM
+# undef XML_DEV_URANDOM
+#endif
+
 /* Define to empty if 'const' does not conform to ANSI C. */
 /* #undef const */
 
