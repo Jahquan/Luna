@@ -6,7 +6,7 @@ BIN=${1:-./luna}
 ROOT_DIR=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 . "$ROOT_DIR/tests/expected_hashes.sh"
 
-if [ ! -x "$BIN" ] && [ -x "$BIN.exe" ]; then
+if [ ! -e "$BIN" ] && [ -f "$BIN.exe" ]; then
 	BIN="$BIN.exe"
 fi
 
@@ -75,7 +75,11 @@ normalize_output() {
 }
 
 TMP_BASE=${TMPDIR:-${TEMP:-${TMP:-/tmp}}}
-TMPDIR=$(mktemp -d "$TMP_BASE/luna-test.XXXXXX")
+if TMPDIR=$(mktemp -d 2>/dev/null); then
+	:
+else
+	TMPDIR=$(mktemp -d "$TMP_BASE/luna-test.XXXXXX")
+fi
 trap 'rm -rf "$TMPDIR"' EXIT INT TERM
 
 help_output=$("$BIN" --help)
