@@ -70,14 +70,20 @@ assert_output_contains() {
 	fi
 }
 
+normalize_output() {
+	printf '%s' "$1" | tr -d '\r'
+}
+
 TMP_BASE=${TMPDIR:-${TEMP:-${TMP:-/tmp}}}
 TMPDIR=$(mktemp -d "$TMP_BASE/luna-test.XXXXXX")
 trap 'rm -rf "$TMPDIR"' EXIT INT TERM
 
 help_output=$("$BIN" --help)
+help_output=$(normalize_output "$help_output")
 assert_output_contains "$help_output" "usage:"
 assert_output_contains "$help_output" "luna [INFILE.py]* [OUTFILE.tns]"
 version_output=$("$BIN" --version)
+version_output=$(normalize_output "$version_output")
 [ "$version_output" = "Luna v2.1" ]
 
 mkdir "$TMPDIR/explicit-python"
@@ -129,6 +135,7 @@ if ln -s "$TMPDIR/recursive-python/main.py" "$TMPDIR/recursive-python/sub/link.p
 	recursive_skipped=3
 fi
 recursive_output=$("$BIN" "$TMPDIR/recursive-python")
+recursive_output=$(normalize_output "$recursive_output")
 assert_file "$TMPDIR/recursive-python/main.tns"
 assert_hash "$TMPDIR/recursive-python/main.tns" "$SINGLE_PY_HASH"
 assert_file "$TMPDIR/recursive-python/sub/deeper/main.tns"
@@ -150,6 +157,7 @@ if empty_output=$("$BIN" "$TMPDIR/empty-recursive" 2>&1); then
 	echo "empty recursive directory should fail" >&2
 	exit 1
 fi
+empty_output=$(normalize_output "$empty_output")
 assert_output_contains "$empty_output" "recursive conversion summary: converted 0, failed 0, skipped 0"
 assert_output_contains "$empty_output" "no Python files found to convert"
 
@@ -226,6 +234,7 @@ if invalid_output=$("$BIN" "$TMPDIR/xml-invalid/Problem1.xml" "$TMPDIR/xml-inval
 	echo "malformed XML should fail conversion" >&2
 	exit 1
 fi
+invalid_output=$(normalize_output "$invalid_output")
 assert_output_contains "$invalid_output" "$TMPDIR/xml-invalid/Problem1.xml"
 assert_output_contains "$invalid_output" "line 2 column"
 assert_hash "$TMPDIR/xml-invalid/invalid.tns" "$PROBLEM_XML_HASH"
@@ -240,6 +249,7 @@ if doctype_output=$("$BIN" "$TMPDIR/xml-doctype/Problem1.xml" "$TMPDIR/xml-docty
 	echo "DOCTYPE XML should fail conversion" >&2
 	exit 1
 fi
+doctype_output=$(normalize_output "$doctype_output")
 assert_output_contains "$doctype_output" "DOCTYPE is not supported"
 assert_missing "$TMPDIR/xml-doctype/doctype.tns"
 
