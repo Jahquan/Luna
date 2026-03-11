@@ -11,6 +11,8 @@ on:
 jobs:
   build:
     runs-on: windows-2022
+    env:
+      MSYSTEM: MINGW64
     steps:
     - name: Checkout Git Repo
       uses: actions/checkout@v3
@@ -23,6 +25,10 @@ jobs:
     - name: Build
       run: |
         mingw32-make -j4 CC=gcc
+
+    - name: Test
+      run: |
+        mingw32-make CC=gcc test
 
     - name: Upload zip
       uses: actions/upload-artifact@v3

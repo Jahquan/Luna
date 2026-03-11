@@ -1,0 +1,37 @@
+name: Emscripten
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  build-web:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout Git Repo
+      uses: actions/checkout@v4
+
+    - name: Install Emscripten SDK
+      shell: bash
+      run: |
+        git clone --depth 1 https://github.com/emscripten-core/emsdk.git "$RUNNER_TEMP/emsdk"
+        "$RUNNER_TEMP/emsdk/emsdk" install latest
+        "$RUNNER_TEMP/emsdk/emsdk" activate latest
+
+    - name: Build web bundle
+      shell: bash
+      run: |
+        source "$RUNNER_TEMP/emsdk/emsdk_env.sh"
+        make -C emscripten
+        test -f emscripten/WebLuna.js
+
+    - name: Upload web artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: luna-web
+        path: |
+          emscripten/WebLuna.js
+          emscripten/WebLuna.wasm
+          emscripten/luna.html

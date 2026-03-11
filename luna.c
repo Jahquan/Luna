@@ -22,12 +22,26 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <ctype.h>
+#include <errno.h>
 #include <string.h>
 #include <strings.h>
-#include <unistd.h>
 #include "DES.h"
 #include <zlib.h>
 #include "minizip-1.1/zip.h"
+#include "third_party/expat/lib/expat.h"
+
+#ifdef _WIN32
+#include <windows.h>
+#include <io.h>
+#include <sys/stat.h>
+#define PATH_SEP '\\'
+#else
+#include <dirent.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#define PATH_SEP '/'
+#endif
 
 #define LUNA_VER "2.1"
 
@@ -38,7 +52,28 @@
 const char *gnu_basename(const char *path)
 {
 	char *base = strrchr(path, '/');
+	char *backslash_base = strrchr(path, '\\');
+	if (!base || (backslash_base && backslash_base > base))
+		base = backslash_base;
 	return base ? base+1 : path;
+}
+
+int unlink_path(const char *path);
+int replace_file_path(const char *source_path, const char *target_path);
+
+void print_usage(void) {
+	puts("Luna v" LUNA_VER " usage:\n"
+				 "  luna [INFILE.lua|INFILE.py|Problem1.xml|Document.xml|ABCD.BMP]\n"
+				 "  luna [INFILE.lua|-] [OUTFILE.tns]\n"
+				 "  luna [INFILE.py]* [OUTFILE.tns]\n"
+				 "  luna DIRECTORY [...DIRECTORY]\n"
+				 "  luna [Problem1.xml|Document.xml|ABCD.BMP]* [OUTFILE.tns]\n"
+				 "Converts a Lua script, Python scripts, or XML problems/documents/resources to a TNS document.\n"
+				 "If no OUTFILE.tns is given for a single input file, Luna writes a .tns next to that input.\n"
+				 "If any input is a directory, Luna recursively converts every .py file it finds in place.\n"
+				 "If the input file '-', reads it as Lua from the standard input.\n"
+				 "For Python, the first script will be the one that shows when the TNS document is opened.\n"
+				 "A default Document.xml will be generated if not specified.");
 }
 
 /* Reads an UTF-8 character from in to *c. Doesn't read at or after end. Returns a pointer to the next character. */
@@ -90,7 +125,7 @@ void *escape_unicode(char *in_buf, size_t header_size, size_t footer_size, size_
 	memcpy(out_buf, in_buf, header_size);
 
 	p = in_buf + header_size;
-	if (!memcmp(in_buf + header_size, "\xEF\xBB\xBF", 3)) // skip the UTF-8 BOM if any
+	if (in_size >= 3 && !memcmp(in_buf + header_size, "\xEF\xBB\xBF", 3)) // skip the UTF-8 BOM if any
 		p += 3;
 	for (op = out_buf + header_size; p < in_buf + header_size + in_size;) {
 		unsigned long uc;
@@ -147,140 +182,483 @@ void *fix_cdata_end_seq(char *in_buf, size_t header_size, size_t in_size, size_t
 	return in_buf;
 }
 
+typedef struct {
+	XML_Parser parser;
+	const char *inf_path;
+	const char *source_start;
+	size_t source_size;
+	char *out_ptr;
+	size_t out_capacity;
+	size_t size_written;
+	unsigned tagid_stack[100];
+	unsigned tagid_head_index;
+	unsigned last_tagid;
+	int copy_started;
+	const char *error_reason;
+} xml_reformat_ctx;
+
+void print_invalid_xml_doc(const char *inf_path, unsigned long line, unsigned long column, const char *reason) {
+	if (inf_path)
+		printf("input file '%s' is not a valid XML document at line %lu column %lu", inf_path, line, column);
+	else
+		printf("input problem/document is not a valid XML document at line %lu column %lu", line, column);
+
+	if (reason && *reason)
+		printf(": %s\n", reason);
+	else
+		putchar('\n');
+}
+
+void stop_xml_parse(xml_reformat_ctx *ctx, const char *reason) {
+	ctx->error_reason = reason;
+	XML_StopParser(ctx->parser, XML_FALSE);
+}
+
+int append_xml_bytes(xml_reformat_ctx *ctx, const char *data, size_t size) {
+	if (ctx->size_written + size > ctx->out_capacity) {
+		stop_xml_parse(ctx, "XML output exceeds converter buffer");
+		return 0;
+	}
+	memcpy(ctx->out_ptr + ctx->size_written, data, size);
+	ctx->size_written += size;
+	return 1;
+}
+
+int current_xml_event_is_self_closing(xml_reformat_ctx *ctx) {
+	XML_Index byte_index = XML_GetCurrentByteIndex(ctx->parser);
+	int byte_count = XML_GetCurrentByteCount(ctx->parser);
+	const char *ptr;
+
+	if (byte_index < 0 || byte_count <= 0)
+		return 0;
+
+	ptr = ctx->source_start + byte_index + byte_count - 1;
+	while (ptr > ctx->source_start + byte_index && isspace((unsigned char)ptr[-1]))
+		ptr--;
+	return ptr > ctx->source_start + byte_index && ptr[-1] == '/';
+}
+
+void XMLCALL xml_default_handler(void *userData, const XML_Char *s, int len) {
+	xml_reformat_ctx *ctx = userData;
+	if (!ctx->copy_started || len <= 0)
+		return;
+	append_xml_bytes(ctx, s, len);
+}
+
+void XMLCALL xml_start_element(void *userData, const XML_Char *name, const XML_Char **atts) {
+	xml_reformat_ctx *ctx = userData;
+	(void)atts;
+
+	if (!ctx->copy_started) {
+		if (strcmp(name, "prob") && strcmp(name, "doc")) {
+			stop_xml_parse(ctx, "input is not a TI-Nspire problem/document");
+			return;
+		}
+		ctx->copy_started = 1;
+	}
+
+	XML_DefaultCurrent(ctx->parser);
+	if (current_xml_event_is_self_closing(ctx))
+		return;
+
+	if (ctx->tagid_head_index >= sizeof(ctx->tagid_stack) / sizeof(*ctx->tagid_stack)) {
+		stop_xml_parse(ctx, "XML nesting exceeds converter limit");
+		return;
+	}
+
+	ctx->tagid_stack[ctx->tagid_head_index++] = ctx->last_tagid++;
+}
+
+void XMLCALL xml_end_element(void *userData, const XML_Char *name) {
+	xml_reformat_ctx *ctx = userData;
+	(void)name;
+
+	if (XML_GetCurrentByteCount(ctx->parser) == 0)
+		return;
+
+	if (ctx->tagid_head_index == 0) {
+		stop_xml_parse(ctx, "unexpected closing tag");
+		return;
+	}
+
+	unsigned index = ctx->tagid_stack[--ctx->tagid_head_index];
+	if (index < 256) {
+		char end_tag[2];
+		end_tag[0] = 0x0E;
+		end_tag[1] = index;
+		append_xml_bytes(ctx, end_tag, sizeof(end_tag));
+	}
+	else
+		XML_DefaultCurrent(ctx->parser);
+}
+
+void XMLCALL xml_start_doctype(void *userData, const XML_Char *doctypeName, const XML_Char *sysid, const XML_Char *pubid, int has_internal_subset) {
+	xml_reformat_ctx *ctx = userData;
+	(void)doctypeName;
+	(void)sysid;
+	(void)pubid;
+	(void)has_internal_subset;
+	stop_xml_parse(ctx, "DOCTYPE is not supported");
+}
+
 /* sub-routine of read_file_and_xml_compress() in case of an XML problem as input. Returns the new in_buf or NULL */
-void *reformat_xml_doc(char *in_buf, size_t header_size, size_t in_size, size_t *obuf_size) {
+void *reformat_xml_doc(char *in_buf, size_t header_size, size_t in_size, size_t *obuf_size, const char *inf_path) {
 	char *out_buf = malloc(header_size + in_size);
+	xml_reformat_ctx ctx;
+	enum XML_Status parse_status;
+
 	if (!out_buf) {
 		puts("reformat_xml_doc: can't alloc");
+		free(in_buf);
 		return NULL;
 	}
+
 	memcpy(out_buf, in_buf, header_size);
-	char *in_ptr = in_buf;
-	char *xml_start = NULL;
-	while(in_ptr < in_buf + in_size + header_size - 5) {
-		if (!memcmp(in_ptr, "<prob", 5) || !memcmp(in_ptr, "<doc", 4)) {
-			xml_start = in_ptr;
-			break;
-		}
-		in_ptr++;
-	}
-	if (!xml_start) {
-		puts("input is not a TI-Nspire problem/document");
-reformat_xml_quit:
+	memset(&ctx, 0, sizeof(ctx));
+	ctx.inf_path = inf_path;
+	ctx.source_start = in_buf + header_size;
+	ctx.source_size = in_size;
+	ctx.out_ptr = out_buf + header_size;
+	ctx.out_capacity = in_size;
+
+	ctx.parser = XML_ParserCreate(NULL);
+	if (!ctx.parser) {
+		puts("reformat_xml_doc: can't create XML parser");
 		free(out_buf);
+		free(in_buf);
 		return NULL;
 	}
-	int size_written = 0;
-	size_t read_offset = 0;
-	size_t size_to_read = in_size + header_size - (xml_start - in_buf);
-	unsigned tagid_stack[100];
-	unsigned tagid_head_index = 0;
-	unsigned last_tagid = 0;
-	char *out_ptr = out_buf + header_size;
-	// very weak XML parsing: all < must be escaped
-	while(read_offset <= size_to_read - 1) {
-		if (xml_start[read_offset] == '<') {
-			if (read_offset + 1 >= size_to_read) {
-invalid_problem:
-				puts("input problem/document is not a valid XML document");
-				goto reformat_xml_quit;
-			}
-			if (xml_start[read_offset + 1] == '/') { // closing tag
-				if (tagid_head_index == 0) {
-					goto invalid_problem;
-				}
-				read_offset++;
-				unsigned index = tagid_stack[--tagid_head_index];
-				if(index < 256) {
-					out_ptr[size_written++] = 0x0E;
-					out_ptr[size_written++] = index;
-					// skip the closing tag
-					while(++read_offset <= size_to_read - 1 && xml_start[read_offset] != '>')
-						;
-				}
-				else {
-					// Too big for the tag store, copy in full
-					const char *tag_first = &xml_start[read_offset - 1];
-					const char *tag_last = memchr(&xml_start[read_offset], '>', size_to_read - read_offset);
-					if(!tag_last)
-						goto invalid_problem;
 
-					memcpy(out_ptr + size_written, tag_first, tag_last - tag_first + 1);
-					size_written += tag_last - tag_first + 1;
-					read_offset = tag_last - xml_start + 1;
-					continue;
-				}
-				if (read_offset > size_to_read - 1) {
-					goto invalid_problem;
-				}
-			}
-			else if (xml_start[read_offset + 1] == '!') { // special
-				if (read_offset + 2 >= size_to_read)
-					goto invalid_problem;
+	XML_SetUserData(ctx.parser, &ctx);
+	XML_SetDefaultHandler(ctx.parser, xml_default_handler);
+	XML_SetElementHandler(ctx.parser, xml_start_element, xml_end_element);
+	XML_SetStartDoctypeDeclHandler(ctx.parser, xml_start_doctype);
 
-				read_offset += 2;
-
-				if (xml_start[read_offset] == '-') {
-					puts("XML comments not supported");
-					goto reformat_xml_quit;
-				}
-
-				if (read_offset + sizeof("[CDATA[]]>") >= size_to_read)
-					goto invalid_problem;
-
-				if (strncmp(&xml_start[read_offset], "[CDATA[", strlen("[CDATA")))
-					goto invalid_problem;
-
-				const char *cdata_first = &xml_start[read_offset - 2];
-				read_offset += strlen("[CDATA[");
-
-				const char *cdata_last = NULL;
-				for(;;) {
-					const char *maybe_last = memchr(xml_start + read_offset, '>', size_to_read - read_offset);
-					if(!maybe_last)
-						break;
-
-					read_offset = maybe_last - xml_start + 1;
-
-					if(!strncmp("]]>", maybe_last - 2, strlen("]]>")))
-						cdata_last = maybe_last;
-				}
-
-				if(!cdata_last)
-					goto invalid_problem;
-
-				// Copy everything including the start and end tags
-				memcpy(out_ptr + size_written, cdata_first, cdata_last - cdata_first + 1);
-				size_written += cdata_last - cdata_first + 1;
-				read_offset = cdata_last - xml_start + 1;
-				continue;
-			}
-			else { // opening tag
-				if (tagid_head_index >= sizeof(tagid_stack) / sizeof(*tagid_stack)) {
-					puts("input problem/document XML too deep");
-					goto reformat_xml_quit;
-				}
-				tagid_stack[tagid_head_index++] = last_tagid++;
-				out_ptr[size_written++] = xml_start[read_offset];
-			}
-		} else {
-			out_ptr[size_written++] = xml_start[read_offset];
+	parse_status = XML_Parse(ctx.parser, ctx.source_start, ctx.source_size, XML_TRUE);
+	if (parse_status != XML_STATUS_OK || ctx.error_reason) {
+		const char *reason = ctx.error_reason;
+		if (!reason) {
+			enum XML_Error error = XML_GetErrorCode(ctx.parser);
+			reason = XML_ErrorString(error);
 		}
-		read_offset++;
+		if (reason && !strcmp(reason, "input is not a TI-Nspire problem/document")) {
+			if (inf_path)
+				printf("input file '%s' is not a TI-Nspire problem/document\n", inf_path);
+			else
+				puts("input is not a TI-Nspire problem/document");
+		}
+		else {
+			unsigned long line = XML_GetCurrentLineNumber(ctx.parser);
+			unsigned long column = XML_GetCurrentColumnNumber(ctx.parser) + 1;
+			print_invalid_xml_doc(inf_path, line ? line : 1, column ? column : 1, reason);
+		}
+		XML_ParserFree(ctx.parser);
+		free(out_buf);
+		free(in_buf);
+		return NULL;
 	}
-	*obuf_size = header_size + size_written;
-	out_buf = realloc(out_buf, *obuf_size);
-	if (!out_buf) {
+
+	XML_ParserFree(ctx.parser);
+	*obuf_size = header_size + ctx.size_written;
+	char *resized_out_buf = realloc(out_buf, *obuf_size);
+	if (!resized_out_buf) {
 		puts("reformat_xml_doc: can't realloc out_buf");
-		goto reformat_xml_quit;
+		free(out_buf);
+		free(in_buf);
+		return NULL;
 	}
 	free(in_buf);
-	return out_buf;
+	return resized_out_buf;
 }
 
 // ext must start with "."
 int has_ext(const char *filepath, const char *ext) {
 	return strlen(filepath) > strlen(ext) && !strcasecmp(ext, filepath + strlen(filepath) - strlen(ext));
+}
+
+char *copy_filepath(const char *filepath) {
+	size_t filepath_size = strlen(filepath) + 1;
+	char *copied_path = malloc(filepath_size);
+	if (!copied_path) {
+		puts("can't malloc copied_path");
+		return NULL;
+	}
+	memcpy(copied_path, filepath, filepath_size);
+	return copied_path;
+}
+
+char *create_temp_outfile_path(const char *outfile_path) {
+#ifdef _WIN32
+	size_t temp_path_size = strlen(outfile_path) + 32;
+	char *temp_path = malloc(temp_path_size);
+	if (!temp_path) {
+		puts("can't malloc temp_path");
+		return NULL;
+	}
+	for (unsigned attempt = 0; attempt < 1000; attempt++) {
+		snprintf(temp_path, temp_path_size, "%s.tmp.%08lx%03u", outfile_path,
+			(unsigned long)GetCurrentProcessId(), attempt);
+		HANDLE temp_file = CreateFileA(temp_path, GENERIC_READ | GENERIC_WRITE, 0, NULL,
+			CREATE_NEW, FILE_ATTRIBUTE_TEMPORARY, NULL);
+		if (temp_file != INVALID_HANDLE_VALUE) {
+			CloseHandle(temp_file);
+			return temp_path;
+		}
+		if (GetLastError() != ERROR_FILE_EXISTS && GetLastError() != ERROR_ALREADY_EXISTS)
+			break;
+	}
+	puts("can't create temporary output file");
+	free(temp_path);
+	return NULL;
+#else
+	static const char temp_suffix[] = ".tmp.XXXXXX";
+	size_t temp_path_size = strlen(outfile_path) + sizeof(temp_suffix);
+	char *temp_path = malloc(temp_path_size);
+	if (!temp_path) {
+		puts("can't malloc temp_path");
+		return NULL;
+	}
+	snprintf(temp_path, temp_path_size, "%s%s", outfile_path, temp_suffix);
+	int temp_fd = mkstemp(temp_path);
+	if (temp_fd < 0) {
+		puts("can't create temporary output file");
+		free(temp_path);
+		return NULL;
+	}
+	close(temp_fd);
+	unlink_path(temp_path);
+	return temp_path;
+#endif
+}
+
+int path_is_qualified(const char *path) {
+	return strchr(path, '/') || strchr(path, '\\') ||
+		(strlen(path) >= 2 && isalpha((unsigned char)path[0]) && path[1] == ':');
+}
+
+char *resolve_single_infile_outfile_path(const char *infile_path, const char *outfile_name) {
+	if (!outfile_name && !strcmp(infile_path, "-")) {
+		puts("reading from standard input requires an explicit output path");
+		return NULL;
+	}
+
+	if (outfile_name && (!strcmp(infile_path, "-") || path_is_qualified(outfile_name)))
+		return copy_filepath(outfile_name);
+
+	const char *basename = gnu_basename(infile_path);
+	size_t dir_size = basename - infile_path;
+	size_t stem_size;
+	if (outfile_name) {
+		stem_size = strlen(outfile_name);
+	}
+	else {
+		const char *ext = strrchr(basename, '.');
+		stem_size = ext ? (size_t)(ext - basename) : strlen(basename);
+	}
+	char *outfile_path = malloc(dir_size + stem_size + (outfile_name ? 1 : sizeof(".tns")));
+	if (!outfile_path) {
+		puts("can't malloc outfile_path");
+		return NULL;
+	}
+	memcpy(outfile_path, infile_path, dir_size);
+	memcpy(outfile_path + dir_size, outfile_name ? outfile_name : basename, stem_size);
+	if (outfile_name)
+		outfile_path[dir_size + stem_size] = '\0';
+	else
+		memcpy(outfile_path + dir_size + stem_size, ".tns", sizeof(".tns"));
+	return outfile_path;
+}
+
+char *join_filepath(const char *dirpath, const char *name) {
+	size_t dirpath_size = strlen(dirpath);
+	size_t name_size = strlen(name) + 1;
+	int needs_sep = dirpath_size > 0 && dirpath[dirpath_size - 1] != '/' && dirpath[dirpath_size - 1] != '\\';
+	char *joined_path = malloc(dirpath_size + needs_sep + name_size);
+	if (!joined_path) {
+		puts("can't malloc joined_path");
+		return NULL;
+	}
+	memcpy(joined_path, dirpath, dirpath_size);
+	if (needs_sep)
+		joined_path[dirpath_size++] = PATH_SEP;
+	memcpy(joined_path + dirpath_size, name, name_size);
+	return joined_path;
+}
+
+typedef struct {
+	char **names;
+	size_t count;
+	size_t capacity;
+} directory_entry_list;
+
+typedef struct {
+	int converted;
+	int failed;
+	int skipped;
+} recursive_batch_stats;
+
+typedef struct {
+	int is_directory;
+	int is_symlink;
+} path_info;
+
+int directory_entry_cmp(const void *left, const void *right) {
+	const char *const *left_name = left;
+	const char *const *right_name = right;
+	return strcmp(*left_name, *right_name);
+}
+
+int append_directory_entry(directory_entry_list *list, const char *name) {
+	if (list->count == list->capacity) {
+		size_t new_capacity = list->capacity ? list->capacity * 2 : 16;
+		char **new_names = realloc(list->names, new_capacity * sizeof(*new_names));
+		if (!new_names) {
+			puts("can't realloc directory entry list");
+			return 1;
+		}
+		list->names = new_names;
+		list->capacity = new_capacity;
+	}
+
+	list->names[list->count] = copy_filepath(name);
+	if (!list->names[list->count])
+		return 1;
+	list->count++;
+	return 0;
+}
+
+void free_directory_entries(directory_entry_list *list) {
+	for (size_t i = 0; i < list->count; i++)
+		free(list->names[i]);
+	free(list->names);
+	list->names = NULL;
+	list->count = list->capacity = 0;
+}
+
+int collect_directory_entries(const char *dirpath, directory_entry_list *list) {
+#ifdef _WIN32
+	char *pattern = join_filepath(dirpath, "*");
+	if (!pattern)
+		return 1;
+	WIN32_FIND_DATAA find_data;
+	HANDLE handle = FindFirstFileA(pattern, &find_data);
+	free(pattern);
+	if (handle == INVALID_HANDLE_VALUE) {
+		DWORD error = GetLastError();
+		if (error == ERROR_FILE_NOT_FOUND)
+			return 0;
+		printf("can't list directory '%s'\n", dirpath);
+		return 1;
+	}
+
+	do {
+		if (!strcmp(find_data.cFileName, ".") || !strcmp(find_data.cFileName, ".."))
+			continue;
+		if (append_directory_entry(list, find_data.cFileName)) {
+			FindClose(handle);
+			return 1;
+		}
+	} while (FindNextFileA(handle, &find_data));
+	FindClose(handle);
+#else
+	DIR *dir = opendir(dirpath);
+	if (!dir) {
+		printf("can't open directory '%s': %s\n", dirpath, strerror(errno));
+		return 1;
+	}
+
+	struct dirent *entry;
+	while ((entry = readdir(dir))) {
+		if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, ".."))
+			continue;
+		if (append_directory_entry(list, entry->d_name)) {
+			closedir(dir);
+			return 1;
+		}
+	}
+	closedir(dir);
+#endif
+
+	qsort(list->names, list->count, sizeof(*list->names), directory_entry_cmp);
+	return 0;
+}
+
+int get_path_info(const char *path, path_info *info) {
+#ifdef _WIN32
+	DWORD attrs = GetFileAttributesA(path);
+	if (attrs == INVALID_FILE_ATTRIBUTES)
+		return 1;
+	info->is_directory = !!(attrs & FILE_ATTRIBUTE_DIRECTORY);
+	info->is_symlink = !!(attrs & FILE_ATTRIBUTE_REPARSE_POINT);
+#else
+	struct stat st;
+	if (lstat(path, &st))
+		return 1;
+	info->is_directory = S_ISDIR(st.st_mode);
+	info->is_symlink = S_ISLNK(st.st_mode);
+#endif
+	return 0;
+}
+
+int path_is_directory(const char *path) {
+	path_info info;
+	return !get_path_info(path, &info) && info.is_directory;
+}
+
+int unlink_path(const char *path) {
+#ifdef _WIN32
+	return DeleteFileA(path) ? 0 : -1;
+#else
+	return unlink(path);
+#endif
+}
+
+int replace_file_path(const char *source_path, const char *target_path) {
+#ifdef _WIN32
+	return MoveFileExA(source_path, target_path, MOVEFILE_REPLACE_EXISTING) ? 0 : -1;
+#else
+	return rename(source_path, target_path);
+#endif
+}
+
+void print_recursive_summary(const recursive_batch_stats *stats) {
+	printf("recursive conversion summary: converted %d, failed %d, skipped %d\n",
+		stats->converted, stats->failed, stats->skipped);
+}
+
+char *encode_python_name_text(const char *filename, size_t *encoded_size) {
+	size_t filename_len = strlen(filename);
+	char *escaped_filename = malloc(filename_len * 5 + 1); // "&amp;"
+	if (!escaped_filename) {
+		puts("can't malloc escaped_filename");
+		return NULL;
+	}
+
+	char *out = escaped_filename;
+	for (const char *in = filename; *in; in++) {
+		const char *replacement = NULL;
+		if (*in == '&')
+			replacement = "&amp;";
+		else if (*in == '<')
+			replacement = "&lt;";
+		else if (*in == '>')
+			replacement = "&gt;";
+
+		if (replacement) {
+			size_t replacement_len = strlen(replacement);
+			memcpy(out, replacement, replacement_len);
+			out += replacement_len;
+		}
+		else {
+			*out++ = *in;
+		}
+	}
+	*out = '\0';
+
+	*encoded_size = out - escaped_filename;
+	char *encoded_filename = escape_unicode(escaped_filename, 0, 0, *encoded_size, encoded_size);
+	free(escaped_filename);
+	return encoded_filename;
 }
 
 /* Returns the output buffer, NULL on error. Fills obuf_size.
@@ -339,7 +717,7 @@ void *read_file_and_xml_compress(const char *inf_path, size_t *obuf_size, const 
 	else
 		inf = fopen(inf_path, "rb");
 	if (!inf) {
-		puts("can't open input file");
+		printf("can't open input file '%s'\n", inf_path);
 		return NULL;
 	}
 	#define FREAD_BLOCK_SIZE 1024
@@ -355,20 +733,28 @@ void *read_file_and_xml_compress(const char *inf_path, size_t *obuf_size, const 
 	while(1) {
 		size_t read_size;
 		if ((read_size = fread(in_buf + in_offset, 1, FREAD_BLOCK_SIZE, inf)) != FREAD_BLOCK_SIZE) {
+			char *resized_in_buf;
 			*obuf_size -= FREAD_BLOCK_SIZE - read_size;
-			if (!(in_buf = realloc(in_buf, *obuf_size))) {
+			resized_in_buf = realloc(in_buf, *obuf_size);
+			if (!resized_in_buf) {
 				puts("can't realloc in_buf");
 				free(in_buf);
+				fclose(inf);
 				return NULL;
 			}
+			in_buf = resized_in_buf;
 			break;
 		}
+		char *resized_in_buf;
 		*obuf_size += FREAD_BLOCK_SIZE;
-		if (!(in_buf = realloc(in_buf, *obuf_size))) {
+		resized_in_buf = realloc(in_buf, *obuf_size);
+		if (!resized_in_buf) {
 			puts("can't realloc in_buf");
 			free(in_buf);
+			fclose(inf);
 			return NULL;
 		}
+		in_buf = resized_in_buf;
 		in_offset += read_size;
 	}
 	size_t in_size = *obuf_size - header_size - footer_size;
@@ -381,7 +767,7 @@ void *read_file_and_xml_compress(const char *inf_path, size_t *obuf_size, const 
 	if (infile_is_xml) {
 		in_buf = escape_unicode(in_buf, header_size, footer_size, in_size, obuf_size);
 		if (!in_buf) return NULL;
-		return reformat_xml_doc(in_buf, header_size, in_size, obuf_size);
+		return reformat_xml_doc(in_buf, header_size, in_size, obuf_size, inf_path);
 	} else {
 		if (!(in_buf = fix_cdata_end_seq(in_buf, header_size, in_size, obuf_size)))
 			return NULL;
@@ -450,7 +836,7 @@ int add_processed_file_to_tns(const char *infile_name, void const *in_buf, long 
 close_quit:
 		zipClose(zipF, NULL);
 unlink_quit:
-		unlink(outfile_path);
+		unlink_path(outfile_path);
 		return 1;
 	}
 	if (zipWriteInFileInZip(zipF, in_buf, in_size) != ZIP_OK) {
@@ -464,11 +850,13 @@ unlink_quit:
 	return 0;
 }
 
-void close_tns(const char *outfile_path) {
+int close_tns(const char *outfile_path) {
 	if (zipClose(zipF, NULL) != ZIP_OK) {
 		puts("can't close file in zip-TNS file");
-		unlink(outfile_path);
+		unlink_path(outfile_path);
+		return 1;
 	}
+	return 0;
 }
 
 // returns the deflated size
@@ -578,79 +966,248 @@ int add_python_xml_to_tns(const char *python_path, const char *tnsfile_path, uns
 		return 1;
 	}
 
-	// Filename goes sandwiched between the header and footer
-	char xmlc_buf[(sizeof(py_header) - 1) + 240 + (sizeof(py_footer) - 1)];
-	snprintf(xmlc_buf, sizeof(xmlc_buf), "%s%s%s", py_header, filename, py_footer);
+	size_t encoded_filename_size;
+	char *encoded_filename = encode_python_name_text(filename, &encoded_filename_size);
+	if (!encoded_filename)
+		return 1;
 
-	size_t total_size = (sizeof(py_header) - 1) + filename_len + (sizeof(py_footer) - 1);
-	return add_compressed_xml_to_tns(tnsfile_path, "Problem1.xml", xmlc_buf, total_size, tiversion);
+	size_t total_size = (sizeof(py_header) - 1) + encoded_filename_size + (sizeof(py_footer) - 1);
+	char *xmlc_buf = malloc(total_size);
+	if (!xmlc_buf) {
+		puts("can't malloc xmlc_buf");
+		free(encoded_filename);
+		return 1;
+	}
+
+	memcpy(xmlc_buf, py_header, sizeof(py_header) - 1);
+	memcpy(xmlc_buf + sizeof(py_header) - 1, encoded_filename, encoded_filename_size);
+	memcpy(xmlc_buf + sizeof(py_header) - 1 + encoded_filename_size, py_footer, sizeof(py_footer) - 1);
+
+	int ret = add_compressed_xml_to_tns(tnsfile_path, "Problem1.xml", xmlc_buf, total_size, tiversion);
+	free(xmlc_buf);
+	free(encoded_filename);
+	return ret;
 }
 
-int main(int argc, char *argv[]) {
-	if (argc < 3) {
-		puts("Luna v" LUNA_VER " usage:\n"
-				 "  luna [INFILE.lua|-] [OUTFILE.tns]\n"
-				 "  luna [INFILE.py]* [OUTFILE.tns]\n"
-				 "  luna [Problem1.xml|Document.xml|ABCD.BMP]* [OUTFILE.tns]\n"
-				 "Converts a Lua script, Python scripts, or XML problems/documents/resources to a TNS document.\n"
-				 "If the input file '-', reads it as Lua from the standard input.\n"
-				 "For Python, the first script will be the one that shows when the TNS document is opened.\n"
-				 "A default Document.xml will be generated if not specified."
-		);
-		return 0;
+int convert_inputs_to_tns(int infile_count, char *const infiles[], const char *outfile_path) {
+	if (infile_count <= 0) {
+		puts("no input files were provided");
+		return 1;
+	}
+
+	char *derived_outfile_path = NULL;
+	char *temp_outfile_path = NULL;
+	const char *final_outfile_path = outfile_path;
+	if (infile_count == 1) {
+		derived_outfile_path = resolve_single_infile_outfile_path(infiles[0], outfile_path);
+		if (!derived_outfile_path)
+			return 1;
+		final_outfile_path = derived_outfile_path;
+	}
+	else if (!outfile_path) {
+		puts("multiple input files require an explicit output path");
+		return 1;
+	}
+
+	temp_outfile_path = create_temp_outfile_path(final_outfile_path);
+	if (!temp_outfile_path) {
+		free(derived_outfile_path);
+		return 1;
 	}
 	unsigned tiversion = 0x0500; // default to document version 5
-	for (int i = 1; i <= argc - 2; i++) { // infiles: the args except the last one
-		if (has_ext(argv[i], ".bmp")) {
+	for (int i = 0; i < infile_count; i++) {
+		if (has_ext(infiles[i], ".bmp")) {
 			tiversion = 0x0700; // bitmap files require the document type to be bumped up to 7
 			break;
 		}
 	}
 
-	char *outfile_path = argv[argc - 1];
-	unlink(outfile_path);
-
 	zipF = 0; // Only useful for emscripten (possible multiple main() calls)
 
 	// Document.xml must be added first to the TNS
 	int has_processed_documentxml = 0;
-	for (int i = 1; i <= argc - 2; i++) { // infiles: the args except the last one
-		if (!strcmp("Document.xml", gnu_basename(argv[i]))) {
-			printf("processing '%s'...\n", argv[i]);
-			int ret = add_infile_to_tns(argv[i], outfile_path, tiversion);
-			if (ret) return ret;
+	for (int i = 0; i < infile_count; i++) {
+		if (!strcmp("Document.xml", gnu_basename(infiles[i]))) {
+			printf("processing '%s'...\n", infiles[i]);
+			int ret = add_infile_to_tns(infiles[i], temp_outfile_path, tiversion);
+			if (ret) {
+				goto convert_cleanup;
+			}
 			has_processed_documentxml = 1;
 		}
 	}
 	if (!has_processed_documentxml) {
-		int ret = add_default_document_to_tns(outfile_path, tiversion);
-		if (ret) return ret;
+		int ret = add_default_document_to_tns(temp_outfile_path, tiversion);
+		if (ret) {
+			goto convert_cleanup;
+		}
 	}
 
 	// Then add all the other files
 	int is_converting_lua = 0;
 	int added_python_xml = 0;
 	int ret;
-	for (int i = 1; i <= argc - 2; i++) { // infiles: the args except the last one
-		if (!strcmp("Document.xml", gnu_basename(argv[i])))
+	for (int i = 0; i < infile_count; i++) {
+		if (!strcmp("Document.xml", gnu_basename(infiles[i])))
 			continue;
-		printf("processing '%s'...\n", argv[i]);
-		if (has_ext(argv[i], ".lua") || !strcmp("-", argv[i])) {
+		printf("processing '%s'...\n", infiles[i]);
+		if (has_ext(infiles[i], ".lua") || !strcmp("-", infiles[i])) {
 			if (is_converting_lua) {
 				puts("[WARN] skipping it, can only add a single Lua script to the TNS file");
 				continue;
 			}
 			is_converting_lua = 1;
 		}
-		if (!added_python_xml && has_ext(argv[i], ".py")) { // Add XML for just the first Python file
-			ret = add_python_xml_to_tns(argv[i], outfile_path, tiversion);
-			if (ret) return ret;
+		if (!added_python_xml && has_ext(infiles[i], ".py")) { // Add XML for just the first Python file
+			ret = add_python_xml_to_tns(infiles[i], temp_outfile_path, tiversion);
+			if (ret) {
+				goto convert_cleanup;
+			}
 			added_python_xml = 1;
 		}
-		ret = add_infile_to_tns(argv[i], outfile_path, tiversion);
-		if (ret) return ret;
+		ret = add_infile_to_tns(infiles[i], temp_outfile_path, tiversion);
+		if (ret) {
+			goto convert_cleanup;
+		}
 	}
 
-	close_tns(outfile_path);
+	if (close_tns(temp_outfile_path))
+		goto convert_cleanup;
+	if (replace_file_path(temp_outfile_path, final_outfile_path)) {
+		printf("can't rename temporary output file to '%s'\n", final_outfile_path);
+		unlink_path(temp_outfile_path);
+		goto convert_cleanup;
+	}
+	printf("wrote '%s'\n", final_outfile_path);
+	free(temp_outfile_path);
+	free(derived_outfile_path);
 	return 0;
+
+convert_cleanup:
+	unlink_path(temp_outfile_path);
+	free(temp_outfile_path);
+	free(derived_outfile_path);
+	return 1;
+}
+
+int convert_python_directory_recursive(const char *dirpath, recursive_batch_stats *stats) {
+	directory_entry_list entries = {0};
+	if (collect_directory_entries(dirpath, &entries)) {
+		stats->failed++;
+		return 1;
+	}
+
+	int status = 0;
+	for (size_t i = 0; i < entries.count; i++) {
+		char *entry_path = join_filepath(dirpath, entries.names[i]);
+		if (!entry_path) {
+			stats->failed++;
+			status = 1;
+			continue;
+		}
+
+		path_info info;
+		if (get_path_info(entry_path, &info)) {
+			printf("can't stat '%s'\n", entry_path);
+			stats->failed++;
+			status = 1;
+			free(entry_path);
+			continue;
+		}
+
+		if (info.is_symlink) {
+			printf("[SKIP] skipping symlink '%s'\n", entry_path);
+			stats->skipped++;
+			free(entry_path);
+			continue;
+		}
+
+		if (info.is_directory) {
+			if (convert_python_directory_recursive(entry_path, stats))
+				status = 1;
+		}
+		else if (has_ext(entry_path, ".py")) {
+			char *infiles[] = { entry_path };
+			if (convert_inputs_to_tns(1, infiles, NULL)) {
+				stats->failed++;
+				status = 1;
+			}
+			else
+				stats->converted++;
+		}
+		else
+			stats->skipped++;
+
+		free(entry_path);
+	}
+
+	free_directory_entries(&entries);
+	return status;
+}
+
+int convert_recursive_python_inputs(int argc, char *argv[]) {
+	recursive_batch_stats stats = {0};
+	int status = 0;
+
+	for (int i = 1; i < argc; i++) {
+		if (path_is_directory(argv[i])) {
+			if (convert_python_directory_recursive(argv[i], &stats))
+				status = 1;
+			continue;
+		}
+
+		if (!has_ext(argv[i], ".py")) {
+			printf("recursive mode only supports Python files and directories: '%s'\n", argv[i]);
+			stats.failed++;
+			status = 1;
+			continue;
+		}
+
+		char *infiles[] = { argv[i] };
+		if (convert_inputs_to_tns(1, infiles, NULL)) {
+			stats.failed++;
+			status = 1;
+		}
+		else
+			stats.converted++;
+	}
+
+	print_recursive_summary(&stats);
+	if (!stats.converted) {
+		puts("no Python files found to convert");
+		return 1;
+	}
+
+	return status;
+}
+
+int main(int argc, char *argv[]) {
+	if (argc < 2) {
+		print_usage();
+		return 0;
+	}
+	if (argc == 2 && (!strcmp(argv[1], "--help") || !strcmp(argv[1], "-h"))) {
+		print_usage();
+		return 0;
+	}
+	if (argc == 2 && (!strcmp(argv[1], "--version") || !strcmp(argv[1], "-V"))) {
+		puts("Luna v" LUNA_VER);
+		return 0;
+	}
+
+	for (int i = 1; i < argc; i++) {
+		if (path_is_directory(argv[i])) {
+			if (argc > 2 && !path_is_directory(argv[argc - 1]) && has_ext(argv[argc - 1], ".tns")) {
+				puts("recursive directory mode does not accept an explicit output path");
+				return 1;
+			}
+			return convert_recursive_python_inputs(argc, argv);
+		}
+	}
+
+	if (argc == 2)
+		return convert_inputs_to_tns(1, &argv[1], NULL);
+	if (argc == 3)
+		return convert_inputs_to_tns(1, &argv[1], argv[2]);
+	return convert_inputs_to_tns(argc - 2, &argv[1], argv[argc - 1]);
 }

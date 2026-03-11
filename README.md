@@ -6,20 +6,67 @@ Lua scripts require OS 3.0.2 or later, and Python scripts require CX II OS 5.2 o
 
 It can also be used to convert any TI-Nspire problems in XML format to TNS documents.
 
+## What this fork adds
+
+This fork keeps Luna's core conversion behavior intact while modernizing the project around it:
+
+* safer output handling with temp-file writes and final-path reporting
+* same-directory output for single-file conversions, even when you pass a bare `OUTFILE.tns`
+* recursive Python directory conversion with deterministic traversal and symlink skipping
+* improved XML parsing and diagnostics via a vendored Expat backend
+* regression tests, sanitizer runs, and GitHub Actions coverage for native builds
+* a richer browser UI for the Emscripten build, including folder upload and drag-and-drop
+
+## Features
+
+* Convert `.lua` programs into `.tns` documents
+* Convert one or more `.py` files into `.tns` documents
+* Convert TI-Nspire XML problem/document bundles into `.tns`
+* Pack `.bmp` resources into XML document bundles
+* Recursively convert Python folder trees in place
+* Build and run a browser version through Emscripten
+* Verify output stability with regression hashes and sanitizer builds
+
 ## Usage
 
+* Single-file conversion:    `luna INFILE.py` or `luna Problem1.xml`
+* Single-file with name:     `luna INFILE.py OUTFILE.tns`
 * Lua program conversion:    `luna INFILE.lua OUTFILE.tns`
 * Problem conversion:        `luna Problem1.xml OUTFILE.tns`
 * Multiple files:            `luna Document.xml Problem1.xml [Problem2.xml...] OUTFILE.tns`
 * Python conversion:         `luna InFile1.py [InFile2.py...] OUTFILE.tns`
+* Recursive Python folders:  `luna worksheets/`
+* Help / version:            `luna --help`, `luna --version`
 
 If the input is `-`, it reads the file from the standard input.  
+If you only pass a single input file, Luna writes the `.tns` next to that source file. If you pass a single input plus a bare output filename like `notes.tns`, that output filename is also created next to the source file.  
+If any input path is a directory, Luna recursively converts every `.py` file it finds and writes each `.tns` next to its source file. Recursive traversal is deterministic, prints a converted/failed/skipped summary, and skips symlinked files/directories to avoid loops.  
 Make sure to encode your Lua or Problem file in UTF-8 if it contains special characters. You can also pack arbitrary files like images into the TNS.  
 For Python, the first script will be the one that shows when the TNS document is opened.
+On success, Luna prints the final output path it wrote.
+
+## Examples
+
+```sh
+# Single Python file, output beside the source file
+luna ~/Desktop/notes.py
+
+# Single Python file, explicit name still written beside the source file
+luna ~/Desktop/notes.py notes.tns
+
+# Multiple Python files into one document
+luna main.py helper.py lesson.tns
+
+# Recursive in-place Python conversion
+luna worksheets/
+
+# XML problem/document bundle with a BMP resource
+luna Document.xml Problem1.xml image.bmp worksheet.tns
+```
 
 ## Bugs, feedback...
 
-Please use the GitHub [issue tracker](https://github.com/ndless-nspire/Luna/issues).
+Please use the GitHub [issue tracker](https://github.com/Jahquan/Luna/issues).
 
 ## License
 
@@ -30,7 +77,49 @@ Luna includes cryptographic software written by Eric Young (eay@cryptsoft.com), 
 ## Building it yourself
 
 You need the zlib (zlib1g-dev/zlib-devel) development library. On macOS, you can use [brew](http://brew.sh/): `brew install zlib`  
-Then you can just run `make`.
+Then you can just run `make`.  
+The XML parser is vendored from Expat 2.7.4 under `third_party/expat`, so there is no extra system XML dependency to install.
+
+Run `make test` to execute the regression checks.
+Run `make sanitize` to exercise the converter under AddressSanitizer and UBSan.
+Run `make -C emscripten` to build the browser bundle when `emcc` is installed. The web UI supports bundling selected files into one `.tns`, uploading a folder to recursively convert every `.py` file in place, drag-and-drop for files/folders, and an in-page run log plus download list.
+
+## Web UI
+
+After building the Emscripten target, serve the `emscripten/` directory as your web root:
+
+```sh
+make -C emscripten
+cd emscripten
+python3 -m http.server 8000
+```
+
+Then open `http://localhost:8000/luna.html`.
+
+The browser UI supports:
+
+* bundling loose `.lua`, `.py`, `.xml`, and `.bmp` files into one `.tns`
+* recursive folder conversion for Python trees
+* drag-and-drop for loose files and supported folders
+* an in-page stdout/stderr log from Luna
+* a download list for generated `.tns` files
+
+## Verification and CI
+
+Native verification is driven by [tests/test_cli.sh](tests/test_cli.sh), which exercises:
+
+* single-file and multi-file Python conversion
+* same-directory output placement rules
+* recursive directory conversion
+* BMP resource packing
+* XML comments, self-closing tags, processing instructions, and failure paths
+* stdin Lua conversion
+
+GitHub Actions coverage lives in:
+
+* `.github/workflows/ci.yml` for Linux/macOS build and sanitizer runs
+* `.github/workflows/windows.yml` for Windows build and test runs
+* `.github/workflows/emscripten.yml` for web bundle builds
 
 ## History
 

@@ -4,52 +4,1274 @@
 <head>
   <meta charset="utf-8">
   <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>luna-web</title>
-  <script type="module">
-    import WebLuna from '/WebLuna.js';
-    window.WebLunaLib = await WebLuna();
+  <style>
+    :root {
+      --bg: #f3eadc;
+      --bg-accent: #d5e4df;
+      --panel: rgba(255, 249, 241, 0.88);
+      --panel-strong: rgba(252, 247, 239, 0.96);
+      --ink: #1f2a2d;
+      --muted: #5d6b6b;
+      --line: rgba(31, 42, 45, 0.14);
+      --shadow: 0 24px 60px rgba(31, 42, 45, 0.14);
+      --accent: #0b6e69;
+      --accent-soft: rgba(11, 110, 105, 0.12);
+      --warning: #b65c1b;
+      --warning-soft: rgba(182, 92, 27, 0.12);
+      --error: #b03a2d;
+      --error-soft: rgba(176, 58, 45, 0.12);
+      --success: #1f7a4b;
+      --success-soft: rgba(31, 122, 75, 0.12);
+      --radius-lg: 28px;
+      --radius-md: 18px;
+      --radius-sm: 12px;
+      --sans: "Avenir Next", "Segoe UI", "Helvetica Neue", sans-serif;
+      --serif: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+      --mono: "SFMono-Regular", "Menlo", "Consolas", monospace;
+    }
 
-    document.getElementById('lunaFileInput').addEventListener("change", function(event)
-    {
-        const file = event.target.files[0];
-        if (!file || !/\.(lua|py|xml)$/.test(file.name))
-        {
-            alert('Error: a .lua or .py script, or an .xml file, is needed');
-            return;
-        }
+    * {
+      box-sizing: border-box;
+    }
 
-        const reader = new FileReader();
-        reader.onloadend = function(event) {
-            if (event.target.readyState == FileReader.DONE)
-            {
-                WebLunaLib.FS.writeFile(file.name, new Uint8Array(event.target.result), {encoding: 'binary'});
-                const tnsName = file.name.replace(/\.[^.]+$/, '.tns');
-                try { WebLunaLib.FS.unlink(tnsName); } catch (e){}
-                if (WebLunaLib.callMain([file.name, tnsName]) !== 0) {
-                    alert('Oops, something went wrong generating the .tns file (see console)');
-                    return;
-                }
-                const tnsFile = WebLunaLib.FS.readFile(tnsName, {encoding: 'binary'});
-                if (tnsFile) {
-                    let a = document.createElement("a");
-                    a.download = tnsName;
-                    a.href = URL.createObjectURL(new Blob([tnsFile], { type: "application/octet-stream" }));
-                    a.dispatchEvent(new MouseEvent("click"));
-                } else {
-                    alert('Oops, something went wrong retrieving the generated .tns file :(');
-                }
-            }
-        };
-        reader.readAsArrayBuffer(file);
-    });
-  </script>
+    html, body {
+      margin: 0;
+      min-height: 100%;
+    }
+
+    body {
+      font-family: var(--sans);
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top left, rgba(11, 110, 105, 0.18), transparent 34%),
+        radial-gradient(circle at top right, rgba(182, 92, 27, 0.16), transparent 30%),
+        linear-gradient(180deg, var(--bg) 0%, #efe4d3 100%);
+      line-height: 1.5;
+    }
+
+    body[data-busy="true"] .mode-card {
+      opacity: 0.76;
+    }
+
+    main {
+      width: min(1180px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 32px 0 56px;
+    }
+
+    .hero {
+      position: relative;
+      overflow: hidden;
+      padding: 36px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      background:
+        linear-gradient(135deg, rgba(255, 250, 244, 0.96), rgba(243, 234, 220, 0.88)),
+        linear-gradient(90deg, rgba(11, 110, 105, 0.06), transparent);
+      box-shadow: var(--shadow);
+    }
+
+    .hero::after {
+      content: "";
+      position: absolute;
+      inset: auto -80px -120px auto;
+      width: 280px;
+      height: 280px;
+      border-radius: 999px;
+      background: radial-gradient(circle, rgba(11, 110, 105, 0.18), transparent 68%);
+      pointer-events: none;
+    }
+
+    .hero-grid {
+      position: relative;
+      display: grid;
+      gap: 24px;
+      grid-template-columns: minmax(0, 1.5fr) minmax(300px, 0.9fr);
+      z-index: 1;
+    }
+
+    h1, h2, h3 {
+      margin: 0;
+      font-family: var(--serif);
+      font-weight: 700;
+      line-height: 1.1;
+      letter-spacing: -0.02em;
+    }
+
+    h1 {
+      font-size: clamp(2.8rem, 6vw, 4.8rem);
+    }
+
+    h2 {
+      font-size: 1.65rem;
+      margin-bottom: 12px;
+    }
+
+    h3 {
+      font-size: 1.1rem;
+      margin-bottom: 8px;
+    }
+
+    p {
+      margin: 0;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 14px;
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--accent);
+    }
+
+    .eyebrow::before {
+      content: "";
+      display: block;
+      width: 30px;
+      height: 1px;
+      background: currentColor;
+    }
+
+    .hero-copy p {
+      max-width: 55ch;
+      margin-top: 16px;
+      font-size: 1.04rem;
+      color: var(--muted);
+    }
+
+    .hero-notes {
+      display: grid;
+      gap: 12px;
+      padding: 24px;
+      border-radius: calc(var(--radius-lg) - 8px);
+      border: 1px solid rgba(11, 110, 105, 0.16);
+      background: rgba(255, 255, 255, 0.62);
+      backdrop-filter: blur(10px);
+    }
+
+    .hero-list {
+      display: grid;
+      gap: 10px;
+      padding: 0;
+      margin: 0;
+      list-style: none;
+    }
+
+    .hero-list li {
+      padding: 10px 12px;
+      border-radius: var(--radius-sm);
+      background: rgba(11, 110, 105, 0.08);
+      color: var(--ink);
+      font-size: 0.94rem;
+    }
+
+    .hero-note {
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+
+    .dropzone {
+      position: relative;
+      margin-top: 24px;
+      padding: 24px;
+      border: 1.5px dashed rgba(11, 110, 105, 0.34);
+      border-radius: var(--radius-lg);
+      background: rgba(255, 255, 255, 0.5);
+      transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
+    }
+
+    .dropzone[data-active="true"] {
+      transform: translateY(-2px);
+      border-color: var(--accent);
+      background: rgba(11, 110, 105, 0.09);
+    }
+
+    .dropzone strong {
+      display: block;
+      font-size: 1.02rem;
+      margin-bottom: 6px;
+    }
+
+    .dropzone p {
+      color: var(--muted);
+    }
+
+    .dropzone-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 14px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: rgba(11, 110, 105, 0.1);
+      color: var(--accent);
+      font-size: 0.82rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }
+
+    .layout {
+      display: grid;
+      gap: 20px;
+      grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
+      margin-top: 24px;
+    }
+
+    .panel-stack {
+      display: grid;
+      gap: 20px;
+    }
+
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      background: var(--panel);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
+    }
+
+    .panel-inner {
+      padding: 24px;
+    }
+
+    .actions-grid {
+      display: grid;
+      gap: 20px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .mode-card {
+      border: 1px solid rgba(31, 42, 45, 0.08);
+      border-radius: calc(var(--radius-lg) - 6px);
+      background: var(--panel-strong);
+      padding: 22px;
+      transition: transform 160ms ease, box-shadow 160ms ease;
+    }
+
+    .mode-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 18px 32px rgba(31, 42, 45, 0.08);
+    }
+
+    .mode-copy {
+      color: var(--muted);
+      margin-bottom: 18px;
+    }
+
+    label {
+      display: block;
+      font-size: 0.88rem;
+      font-weight: 700;
+      color: var(--ink);
+      margin-bottom: 8px;
+    }
+
+    .field-help {
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 0.84rem;
+    }
+
+    input[type="text"] {
+      width: 100%;
+      padding: 14px 16px;
+      border: 1px solid rgba(31, 42, 45, 0.12);
+      border-radius: var(--radius-sm);
+      background: rgba(255, 255, 255, 0.92);
+      font: inherit;
+      color: var(--ink);
+      transition: border-color 160ms ease, box-shadow 160ms ease;
+    }
+
+    input[type="text"]:focus {
+      outline: none;
+      border-color: rgba(11, 110, 105, 0.45);
+      box-shadow: 0 0 0 4px rgba(11, 110, 105, 0.12);
+    }
+
+    input[type="file"] {
+      width: 100%;
+      color: var(--muted);
+      font: inherit;
+    }
+
+    input[type="file"]::file-selector-button {
+      margin-right: 12px;
+      padding: 11px 14px;
+      border: none;
+      border-radius: 999px;
+      background: var(--ink);
+      color: #fff8f0;
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+      transition: transform 160ms ease, background 160ms ease;
+    }
+
+    input[type="file"]::file-selector-button:hover {
+      transform: translateY(-1px);
+      background: #101617;
+    }
+
+    input:disabled,
+    button:disabled {
+      cursor: wait;
+    }
+
+    .summary-card,
+    .status-card,
+    .log-card,
+    .results-card {
+      display: grid;
+      gap: 14px;
+    }
+
+    .summary-header,
+    .status-header,
+    .section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .summary-text,
+    .status-detail,
+    .empty-state,
+    .compatibility-note {
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+
+    .status-card {
+      padding: 24px;
+      background: var(--panel-strong);
+    }
+
+    .status-card[data-state="ready"] {
+      background: linear-gradient(180deg, rgba(11, 110, 105, 0.08), rgba(255, 255, 255, 0.92));
+    }
+
+    .status-card[data-state="running"] {
+      background: linear-gradient(180deg, rgba(182, 92, 27, 0.12), rgba(255, 255, 255, 0.92));
+    }
+
+    .status-card[data-state="success"] {
+      background: linear-gradient(180deg, rgba(31, 122, 75, 0.14), rgba(255, 255, 255, 0.94));
+    }
+
+    .status-card[data-state="error"] {
+      background: linear-gradient(180deg, rgba(176, 58, 45, 0.14), rgba(255, 255, 255, 0.94));
+    }
+
+    .status-card[data-state="warning"] {
+      background: linear-gradient(180deg, rgba(182, 92, 27, 0.12), rgba(255, 255, 255, 0.94));
+    }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 9px 12px;
+      border-radius: 999px;
+      font-size: 0.8rem;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      background: rgba(31, 42, 45, 0.08);
+    }
+
+    .status-card[data-state="ready"] .status-badge {
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+
+    .status-card[data-state="running"] .status-badge,
+    .status-card[data-state="warning"] .status-badge {
+      background: var(--warning-soft);
+      color: var(--warning);
+    }
+
+    .status-card[data-state="success"] .status-badge {
+      background: var(--success-soft);
+      color: var(--success);
+    }
+
+    .status-card[data-state="error"] .status-badge {
+      background: var(--error-soft);
+      color: var(--error);
+    }
+
+    .metric-grid {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .metric {
+      padding: 14px;
+      border-radius: var(--radius-md);
+      border: 1px solid rgba(31, 42, 45, 0.08);
+      background: rgba(255, 255, 255, 0.72);
+    }
+
+    .metric-label {
+      display: block;
+      color: var(--muted);
+      font-size: 0.74rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 6px;
+    }
+
+    .metric-value {
+      font-family: var(--serif);
+      font-size: 1.45rem;
+      line-height: 1;
+    }
+
+    .selection-list,
+    .downloads {
+      display: grid;
+      gap: 10px;
+      padding: 0;
+      margin: 0;
+      list-style: none;
+    }
+
+    .selection-item,
+    .download-item {
+      display: grid;
+      gap: 4px;
+      padding: 12px 14px;
+      border-radius: var(--radius-md);
+      border: 1px solid rgba(31, 42, 45, 0.08);
+      background: rgba(255, 255, 255, 0.72);
+    }
+
+    .selection-primary,
+    .download-path {
+      font-family: var(--mono);
+      font-size: 0.9rem;
+      word-break: break-all;
+    }
+
+    .selection-secondary,
+    .download-meta {
+      color: var(--muted);
+      font-size: 0.84rem;
+    }
+
+    .download-item {
+      gap: 10px;
+    }
+
+    .download-link {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 10px 14px;
+      border-radius: 999px;
+      background: var(--accent);
+      color: white;
+      text-decoration: none;
+      font-weight: 700;
+      width: fit-content;
+    }
+
+    .download-link:hover {
+      background: #075954;
+    }
+
+    .log-card pre {
+      margin: 0;
+      padding: 16px;
+      min-height: 220px;
+      max-height: 420px;
+      overflow: auto;
+      border-radius: var(--radius-md);
+      background: #182022;
+      color: #dbe7e5;
+      font-family: var(--mono);
+      font-size: 0.84rem;
+      line-height: 1.55;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .log-empty {
+      color: #99adab;
+    }
+
+    .compatibility-note {
+      padding: 12px 14px;
+      border-radius: var(--radius-md);
+      background: rgba(11, 110, 105, 0.08);
+    }
+
+    .footer-note {
+      margin-top: 18px;
+      color: var(--muted);
+      font-size: 0.84rem;
+    }
+
+    @media (max-width: 980px) {
+      .hero-grid,
+      .layout,
+      .actions-grid {
+        grid-template-columns: 1fr;
+      }
+
+      main {
+        width: min(100% - 20px, 1180px);
+        padding-top: 18px;
+      }
+
+      .hero,
+      .panel-inner,
+      .status-card {
+        padding: 20px;
+      }
+
+      .metric-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
 </head>
 
-<body>
+<body data-busy="false">
+  <main>
+    <section class="hero">
+      <div class="hero-grid">
+        <div class="hero-copy">
+          <div class="eyebrow">TI-Nspire Converter</div>
+          <h1>Luna web</h1>
+          <p>Turn Lua, Python, XML, and BMP inputs into `.tns` documents in the browser, or drop a Python folder to recursively generate matching `.tns` files beside every script path in the virtual filesystem.</p>
+        </div>
+        <aside class="hero-notes">
+          <h3>What stays the same</h3>
+          <ul class="hero-list">
+            <li>Native Luna conversion logic and XML handling stay untouched.</li>
+            <li>Single-output bundling still mirrors the CLI argument order.</li>
+            <li>Folder mode still only converts Python recursively.</li>
+          </ul>
+          <p class="hero-note">This UI just makes the browser path clearer and easier to operate.</p>
+        </aside>
+      </div>
 
-<div>
-    Create a .tns file from a .lua/.py script (or Problem1.xml): <input type="file" accept=".lua,.py,.xml" id="lunaFileInput"/><br>
-</div>
+      <section class="dropzone" id="lunaDropzone" data-active="false" aria-live="polite">
+        <strong>Drop files or a folder here</strong>
+        <p>Drop loose `.lua`, `.py`, `.xml`, or `.bmp` files to build one `.tns`, or drop a Python folder tree to run recursive conversion.</p>
+        <div class="dropzone-meta">
+          <span class="pill">Bundle mode</span>
+          <span class="pill">Recursive folder mode</span>
+          <span class="pill">Automatic downloads</span>
+        </div>
+      </section>
+    </section>
 
+    <section class="layout">
+      <div class="panel-stack">
+        <section class="panel">
+          <div class="panel-inner">
+            <div class="actions-grid">
+              <article class="mode-card">
+                <h2>Bundle files</h2>
+                <p class="mode-copy">Select one or more files and Luna will build a single `.tns` document from them.</p>
+                <label for="lunaFileInput">Input files</label>
+                <input type="file" accept=".lua,.py,.xml,.bmp" id="lunaFileInput" multiple>
+
+                <label for="tnsOutputName" style="margin-top: 16px;">Output file name</label>
+                <input type="text" id="tnsOutputName" placeholder="document.tns" autocomplete="off" spellcheck="false">
+                <div class="field-help">If left blank, Luna uses the first selected file name with a `.tns` extension.</div>
+              </article>
+
+              <article class="mode-card">
+                <h2>Convert folder</h2>
+                <p class="mode-copy">Pick a folder to recursively convert every `.py` file it contains into a same-name `.tns` output.</p>
+                <label for="lunaFolderInput">Python folder tree</label>
+                <input type="file" id="lunaFolderInput" webkitdirectory directory multiple>
+                <div class="field-help">Folder mode ignores non-Python files and uses Luna's recursive CLI behavior.</div>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-inner summary-card">
+            <div class="section-header">
+              <div>
+                <h2>Selection preview</h2>
+                <p class="summary-text">The UI shows what will be sent to Luna before each run.</p>
+              </div>
+            </div>
+
+            <div class="actions-grid">
+              <div>
+                <div class="summary-header">
+                  <h3>Bundle selection</h3>
+                  <span class="pill" id="bundleCountPill">0 files</span>
+                </div>
+                <p class="summary-text" id="bundleSummaryText">Choose loose files for a single `.tns` output.</p>
+                <ul class="selection-list" id="bundleSelectionList"></ul>
+              </div>
+
+              <div>
+                <div class="summary-header">
+                  <h3>Folder selection</h3>
+                  <span class="pill" id="folderCountPill">0 scripts</span>
+                </div>
+                <p class="summary-text" id="folderSummaryText">Choose a folder to recursively convert Python files.</p>
+                <ul class="selection-list" id="folderSelectionList"></ul>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <div class="panel-stack">
+        <section class="panel status-card" id="statusCard" data-state="running" aria-live="polite">
+          <div class="status-header">
+            <div>
+              <h2 id="statusTitle">Loading Luna web...</h2>
+              <p class="status-detail" id="statusDetail">Initializing the converter runtime.</p>
+            </div>
+            <span class="status-badge" id="statusBadge">Loading</span>
+          </div>
+
+          <div class="metric-grid">
+            <div class="metric">
+              <span class="metric-label">Downloads</span>
+              <span class="metric-value" id="downloadCountMetric">0</span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Last run</span>
+              <span class="metric-value" id="lastRunMetric">-</span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Mode</span>
+              <span class="metric-value" id="modeMetric">Idle</span>
+            </div>
+          </div>
+
+          <p class="compatibility-note" id="compatibilityNote"></p>
+        </section>
+
+        <section class="panel">
+          <div class="panel-inner results-card">
+            <div class="section-header">
+              <div>
+                <h2>Downloads</h2>
+                <p class="summary-text">Generated outputs stay here until the next run clears them.</p>
+              </div>
+            </div>
+            <p class="empty-state" id="downloadsEmpty">No generated `.tns` files yet.</p>
+            <ul class="downloads" id="lunaDownloads"></ul>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-inner log-card">
+            <div class="section-header">
+              <div>
+                <h2>Run log</h2>
+                <p class="summary-text">Luna stdout and stderr are mirrored here, along with UI-side validation messages.</p>
+              </div>
+            </div>
+            <pre id="lunaLog"><span class="log-empty">Waiting for Luna to finish loading...</span></pre>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <p class="footer-note">Folder upload and folder drag-and-drop rely on browser support for `webkitdirectory` and the File and Directory Entries API.</p>
+  </main>
+
+  <script type="module">
+    import WebLuna from '/WebLuna.js';
+
+    const supportedInput = /\.(lua|py|xml|bmp)$/i;
+    const pythonInput = /\.py$/i;
+    const maxPreviewEntries = 6;
+    const dom = {
+      body: document.body,
+      fileInput: document.getElementById('lunaFileInput'),
+      folderInput: document.getElementById('lunaFolderInput'),
+      outputNameInput: document.getElementById('tnsOutputName'),
+      dropzone: document.getElementById('lunaDropzone'),
+      bundleSelectionList: document.getElementById('bundleSelectionList'),
+      folderSelectionList: document.getElementById('folderSelectionList'),
+      bundleSummaryText: document.getElementById('bundleSummaryText'),
+      folderSummaryText: document.getElementById('folderSummaryText'),
+      bundleCountPill: document.getElementById('bundleCountPill'),
+      folderCountPill: document.getElementById('folderCountPill'),
+      statusCard: document.getElementById('statusCard'),
+      statusTitle: document.getElementById('statusTitle'),
+      statusDetail: document.getElementById('statusDetail'),
+      statusBadge: document.getElementById('statusBadge'),
+      compatibilityNote: document.getElementById('compatibilityNote'),
+      downloads: document.getElementById('lunaDownloads'),
+      downloadsEmpty: document.getElementById('downloadsEmpty'),
+      downloadCountMetric: document.getElementById('downloadCountMetric'),
+      lastRunMetric: document.getElementById('lastRunMetric'),
+      modeMetric: document.getElementById('modeMetric'),
+      log: document.getElementById('lunaLog')
+    };
+
+    const state = {
+      busy: false,
+      dropDepth: 0,
+      downloadUrls: []
+    };
+
+    function formatBytes(size) {
+      if (size < 1024)
+        return `${size} B`;
+      if (size < 1024 * 1024)
+        return `${(size / 1024).toFixed(1)} KB`;
+      return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+    }
+
+    function defaultTnsName(name) {
+      return name.replace(/\.[^.]+$/, '.tns');
+    }
+
+    function dirname(path) {
+      const slashIndex = path.lastIndexOf('/');
+      return slashIndex === -1 ? '' : path.slice(0, slashIndex);
+    }
+
+    function basename(path) {
+      const slashIndex = path.lastIndexOf('/');
+      return slashIndex === -1 ? path : path.slice(slashIndex + 1);
+    }
+
+    function unique(values) {
+      return [...new Set(values)];
+    }
+
+    function toSourceFile(file, path) {
+      return {
+        file,
+        path,
+        name: basename(path),
+        size: file.size
+      };
+    }
+
+    function setBusy(isBusy) {
+      state.busy = isBusy;
+      dom.body.dataset.busy = isBusy ? 'true' : 'false';
+      dom.fileInput.disabled = isBusy;
+      dom.folderInput.disabled = isBusy;
+      dom.outputNameInput.disabled = isBusy;
+    }
+
+    function setStatus(kind, title, detail, badgeText) {
+      dom.statusCard.dataset.state = kind;
+      dom.statusTitle.textContent = title;
+      dom.statusDetail.textContent = detail;
+      dom.statusBadge.textContent = badgeText || kind;
+    }
+
+    function setModeMetric(label) {
+      dom.modeMetric.textContent = label;
+    }
+
+    function touchLastRun() {
+      dom.lastRunMetric.textContent = new Date().toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    }
+
+    function clearLog() {
+      dom.log.innerHTML = '<span class="log-empty">Run log cleared for the next conversion.</span>';
+    }
+
+    function appendLog(message, tone = 'info') {
+      if (!message)
+        return;
+      const trimmed = String(message).trim();
+      if (!trimmed)
+        return;
+
+      if (dom.log.querySelector('.log-empty'))
+        dom.log.textContent = '';
+
+      const prefix = tone === 'error' ? '[stderr]' : tone === 'ui' ? '[ui]' : '[stdout]';
+      dom.log.textContent += `${prefix} ${trimmed}\n`;
+      dom.log.scrollTop = dom.log.scrollHeight;
+    }
+
+    function clearDownloads() {
+      for (const url of state.downloadUrls)
+        URL.revokeObjectURL(url);
+      state.downloadUrls = [];
+      dom.downloads.textContent = '';
+      dom.downloadsEmpty.hidden = false;
+      dom.downloadCountMetric.textContent = '0';
+    }
+
+    function addDownloadCard(path) {
+      const outputBytes = window.WebLunaLib.FS.readFile(path, { encoding: 'binary' });
+      const url = URL.createObjectURL(new Blob([outputBytes], { type: 'application/octet-stream' }));
+      state.downloadUrls.push(url);
+
+      const item = document.createElement('li');
+      item.className = 'download-item';
+
+      const pathNode = document.createElement('div');
+      pathNode.className = 'download-path';
+      pathNode.textContent = path;
+
+      const metaNode = document.createElement('div');
+      metaNode.className = 'download-meta';
+      metaNode.textContent = `${formatBytes(outputBytes.length)} output`;
+
+      const link = document.createElement('a');
+      link.className = 'download-link';
+      link.textContent = 'Download .tns';
+      link.download = path.replace(/\//g, '__');
+      link.href = url;
+
+      item.appendChild(pathNode);
+      item.appendChild(metaNode);
+      item.appendChild(link);
+      dom.downloads.appendChild(item);
+      dom.downloadsEmpty.hidden = true;
+      dom.downloadCountMetric.textContent = String(dom.downloads.childElementCount);
+
+      return link;
+    }
+
+    function summarizeSelection(listNode, items, emptyMessage) {
+      listNode.textContent = '';
+      if (!items.length) {
+        const item = document.createElement('li');
+        item.className = 'selection-item';
+        item.textContent = emptyMessage;
+        listNode.appendChild(item);
+        return;
+      }
+
+      const visibleItems = items.slice(0, maxPreviewEntries);
+      for (const itemData of visibleItems) {
+        const item = document.createElement('li');
+        item.className = 'selection-item';
+
+        const primary = document.createElement('div');
+        primary.className = 'selection-primary';
+        primary.textContent = itemData.primary;
+
+        const secondary = document.createElement('div');
+        secondary.className = 'selection-secondary';
+        secondary.textContent = itemData.secondary;
+
+        item.appendChild(primary);
+        item.appendChild(secondary);
+        listNode.appendChild(item);
+      }
+
+      if (items.length > visibleItems.length) {
+        const item = document.createElement('li');
+        item.className = 'selection-item';
+        item.textContent = `+ ${items.length - visibleItems.length} more`;
+        listNode.appendChild(item);
+      }
+    }
+
+    function updateBundlePreview(sources) {
+      dom.bundleCountPill.textContent = `${sources.length} file${sources.length === 1 ? '' : 's'}`;
+      if (!sources.length) {
+        dom.bundleSummaryText.textContent = 'Choose loose files for a single `.tns` output.';
+        summarizeSelection(dom.bundleSelectionList, [], 'No bundle inputs selected.');
+        return;
+      }
+
+      const totalBytes = sources.reduce((sum, source) => sum + source.size, 0);
+      dom.bundleSummaryText.textContent = `Preparing ${sources.length} input file${sources.length === 1 ? '' : 's'} totaling ${formatBytes(totalBytes)}.`;
+      summarizeSelection(
+        dom.bundleSelectionList,
+        sources.map((source) => ({
+          primary: source.name,
+          secondary: `${source.name.match(supportedInput)?.[0] || 'input'} • ${formatBytes(source.size)}`
+        })),
+        'No bundle inputs selected.'
+      );
+    }
+
+    function updateFolderPreview(sources) {
+      dom.folderCountPill.textContent = `${sources.length} script${sources.length === 1 ? '' : 's'}`;
+      if (!sources.length) {
+        dom.folderSummaryText.textContent = 'Choose a folder to recursively convert Python files.';
+        summarizeSelection(dom.folderSelectionList, [], 'No folder inputs selected.');
+        return;
+      }
+
+      const roots = unique(sources.map((source) => source.path.split('/')[0]));
+      dom.folderSummaryText.textContent = `Detected ${sources.length} Python file${sources.length === 1 ? '' : 's'} across ${roots.length} top-level folder${roots.length === 1 ? '' : 's'}.`;
+      summarizeSelection(
+        dom.folderSelectionList,
+        sources.map((source) => ({
+          primary: source.path,
+          secondary: `${formatBytes(source.size)} • outputs ${defaultTnsName(source.name)}`
+        })),
+        'No folder inputs selected.'
+      );
+    }
+
+    function ensureFsDirectory(path) {
+      if (!path)
+        return;
+
+      const parts = path.split('/').filter(Boolean);
+      let current = '';
+      for (const part of parts) {
+        current = current ? `${current}/${part}` : part;
+        try {
+          window.WebLunaLib.FS.mkdir(current);
+        }
+        catch (error) {
+        }
+      }
+    }
+
+    function removeFsPath(path) {
+      try {
+        window.WebLunaLib.FS.unlink(path);
+      }
+      catch (error) {
+      }
+    }
+
+    function normalizeOutputName(rawValue, fallbackName) {
+      const trimmed = rawValue.trim();
+      const base = trimmed || defaultTnsName(fallbackName);
+      return /\.tns$/i.test(base) ? base : `${base}.tns`;
+    }
+
+    function updateCompatibilityNote() {
+      const supportsFolderPicker = 'webkitdirectory' in dom.folderInput;
+      const supportsFolderDrop = typeof DataTransferItem !== 'undefined'
+        && 'webkitGetAsEntry' in DataTransferItem.prototype;
+
+      if (supportsFolderPicker && supportsFolderDrop) {
+        dom.compatibilityNote.textContent = 'Folder picking and folder drag-and-drop are available in this browser.';
+        return;
+      }
+
+      dom.compatibilityNote.textContent = 'This browser can still bundle loose files, but folder workflows need `webkitdirectory` and `webkitGetAsEntry` support.';
+    }
+
+    function autoFillOutputName(sources) {
+      if (!sources.length)
+        return;
+
+      if (dom.outputNameInput.dataset.touched === 'true' && dom.outputNameInput.value.trim())
+        return;
+
+      dom.outputNameInput.value = defaultTnsName(sources[0].name);
+      dom.outputNameInput.dataset.touched = 'false';
+    }
+
+    function normalizeLooseFiles(files) {
+      return files.map((file) => toSourceFile(file, file.name));
+    }
+
+    function normalizeFolderFiles(files) {
+      return files.map((file) => toSourceFile(file, file.webkitRelativePath || file.name));
+    }
+
+    async function readFile(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = function(event) {
+          if (event.target.readyState !== FileReader.DONE) {
+            reject(new Error('could not read file'));
+            return;
+          }
+          resolve(new Uint8Array(event.target.result));
+        };
+        reader.onerror = reject;
+        reader.readAsArrayBuffer(file);
+      });
+    }
+
+    async function writeFsSource(source) {
+      ensureFsDirectory(dirname(source.path));
+      window.WebLunaLib.FS.writeFile(source.path, await readFile(source.file), { encoding: 'binary' });
+    }
+
+    async function withRun(modeLabel, runningMessage, callback) {
+      if (state.busy)
+        return;
+
+      clearDownloads();
+      clearLog();
+      setBusy(true);
+      setModeMetric(modeLabel);
+      setStatus('running', runningMessage, 'Luna is processing the current selection.', 'Running');
+      appendLog(`${modeLabel}: starting conversion.`, 'ui');
+
+      try {
+        const result = await callback();
+        if (!result) {
+          setStatus('ready', 'Luna web is ready', 'Choose files, pick a folder, or drag inputs into the dropzone.', 'Ready');
+          return;
+        }
+        touchLastRun();
+        setStatus('success', result.title, result.detail, 'Ready');
+        appendLog(result.detail, 'ui');
+      }
+      catch (error) {
+        console.error(error);
+        touchLastRun();
+        setStatus('error', 'Conversion failed', error.message || 'See the browser console for details.', 'Error');
+        appendLog(error.message || 'Conversion failed.', 'error');
+      }
+      finally {
+        setBusy(false);
+      }
+    }
+
+    async function runBundleConversion(sources) {
+      if (!sources.length)
+        return;
+
+      const invalidSource = sources.find((source) => !supportedInput.test(source.name));
+      if (invalidSource)
+        throw new Error(`Unsupported input '${invalidSource.name}'. Use .lua, .py, .xml, or .bmp files.`);
+
+      const inputNames = sources.map((source) => source.name);
+      if (unique(inputNames).length !== inputNames.length)
+        throw new Error('Duplicate filenames are not supported in luna-web bundle mode.');
+
+      autoFillOutputName(sources);
+      const outputName = normalizeOutputName(dom.outputNameInput.value, sources[0].name);
+
+      for (const source of sources)
+        await writeFsSource(source);
+
+      removeFsPath(outputName);
+      appendLog(`bundle inputs: ${inputNames.join(', ')}`, 'ui');
+      if (window.WebLunaLib.callMain([...inputNames, outputName]) !== 0)
+        throw new Error('Bundle conversion failed. Review the run log for Luna output.');
+
+      const link = addDownloadCard(outputName);
+      link.dispatchEvent(new MouseEvent('click'));
+      return {
+        title: `Downloaded ${outputName}`,
+        detail: `Generated one bundled document from ${sources.length} input file${sources.length === 1 ? '' : 's'}.`
+      };
+    }
+
+    async function runFolderConversion(sources) {
+      if (!sources.length)
+        return;
+
+      const pythonSources = sources.filter((source) => pythonInput.test(source.path));
+      if (!pythonSources.length)
+        throw new Error('The selected folder does not contain any .py files.');
+
+      for (const source of pythonSources)
+        await writeFsSource(source);
+
+      const roots = unique(pythonSources.map((source) => source.path.split('/')[0]));
+      appendLog(`folder roots: ${roots.join(', ')}`, 'ui');
+      if (window.WebLunaLib.callMain(roots) !== 0)
+        throw new Error('Folder conversion failed. Review the run log for Luna output.');
+
+      const outputPaths = pythonSources.map((source) => source.path.replace(/\.[^.]+$/i, '.tns'));
+      let firstLink = null;
+      for (const outputPath of outputPaths) {
+        const link = addDownloadCard(outputPath);
+        if (!firstLink)
+          firstLink = link;
+      }
+      firstLink?.dispatchEvent(new MouseEvent('click'));
+      return {
+        title: `Generated ${outputPaths.length} .tns file${outputPaths.length === 1 ? '' : 's'}`,
+        detail: `Recursive folder conversion finished for ${pythonSources.length} Python source file${pythonSources.length === 1 ? '' : 's'}.`
+      };
+    }
+
+    function setDropActive(isActive) {
+      dom.dropzone.dataset.active = isActive ? 'true' : 'false';
+    }
+
+    function resetFileInput(input) {
+      input.value = '';
+    }
+
+    function readEntryFile(entry) {
+      return new Promise((resolve, reject) => entry.file(resolve, reject));
+    }
+
+    function readAllDirectoryEntries(reader) {
+      return new Promise((resolve, reject) => {
+        const entries = [];
+        function readBatch() {
+          reader.readEntries((batch) => {
+            if (!batch.length) {
+              resolve(entries);
+              return;
+            }
+            entries.push(...batch);
+            readBatch();
+          }, reject);
+        }
+        readBatch();
+      });
+    }
+
+    async function collectDroppedEntryFiles(entry, prefix = '') {
+      const relativePath = prefix ? `${prefix}/${entry.name}` : entry.name;
+      if (entry.isFile) {
+        const file = await readEntryFile(entry);
+        return [toSourceFile(file, relativePath)];
+      }
+
+      if (!entry.isDirectory)
+        return [];
+
+      const entries = await readAllDirectoryEntries(entry.createReader());
+      const nested = [];
+      for (const childEntry of entries)
+        nested.push(...await collectDroppedEntryFiles(childEntry, relativePath));
+      return nested;
+    }
+
+    async function normalizeDroppedItems(dataTransferItems) {
+      const items = Array.from(dataTransferItems || []);
+      const entries = [];
+      const looseFiles = [];
+
+      for (const item of items) {
+        const entry = item.webkitGetAsEntry?.();
+        if (entry) {
+          entries.push(entry);
+          continue;
+        }
+
+        const file = item.getAsFile?.();
+        if (file)
+          looseFiles.push(toSourceFile(file, file.name));
+      }
+
+      if (!entries.length)
+        return { hasDirectories: false, sources: looseFiles };
+
+      const sources = [];
+      for (const entry of entries)
+        sources.push(...await collectDroppedEntryFiles(entry));
+
+      return {
+        hasDirectories: entries.some((entry) => entry.isDirectory) || sources.some((source) => source.path.includes('/')),
+        sources
+      };
+    }
+
+    dom.outputNameInput.addEventListener('input', function() {
+      dom.outputNameInput.dataset.touched = dom.outputNameInput.value.trim() ? 'true' : 'false';
+    });
+
+    dom.fileInput.addEventListener('change', async function(event) {
+      const sources = normalizeLooseFiles(Array.from(event.target.files));
+      updateBundlePreview(sources);
+      autoFillOutputName(sources);
+      resetFileInput(dom.fileInput);
+      await withRun('Bundle', 'Generating bundled .tns...', () => runBundleConversion(sources));
+    });
+
+    dom.folderInput.addEventListener('change', async function(event) {
+      const sources = normalizeFolderFiles(Array.from(event.target.files));
+      updateFolderPreview(sources.filter((source) => pythonInput.test(source.path)));
+      resetFileInput(dom.folderInput);
+      await withRun('Recursive', 'Generating recursive Python outputs...', () => runFolderConversion(sources));
+    });
+
+    dom.dropzone.addEventListener('dragenter', function(event) {
+      event.preventDefault();
+      state.dropDepth++;
+      setDropActive(true);
+    });
+
+    dom.dropzone.addEventListener('dragover', function(event) {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'copy';
+      setDropActive(true);
+    });
+
+    dom.dropzone.addEventListener('dragleave', function(event) {
+      event.preventDefault();
+      state.dropDepth = Math.max(0, state.dropDepth - 1);
+      if (!state.dropDepth)
+        setDropActive(false);
+    });
+
+    dom.dropzone.addEventListener('drop', async function(event) {
+      event.preventDefault();
+      state.dropDepth = 0;
+      setDropActive(false);
+      if (state.busy)
+        return;
+
+      const dropped = await normalizeDroppedItems(event.dataTransfer?.items);
+      if (!dropped.sources.length) {
+        setStatus('warning', 'Nothing usable was dropped', 'Drop supported files or a Python folder tree.', 'Warning');
+        appendLog('drop ignored: no supported files detected.', 'ui');
+        return;
+      }
+
+      if (dropped.hasDirectories) {
+        const pythonSources = dropped.sources.filter((source) => pythonInput.test(source.path));
+        updateFolderPreview(pythonSources);
+        await withRun('Recursive', 'Generating recursive Python outputs...', () => runFolderConversion(dropped.sources));
+        return;
+      }
+
+      updateBundlePreview(dropped.sources);
+      autoFillOutputName(dropped.sources);
+      await withRun('Bundle', 'Generating bundled .tns...', () => runBundleConversion(dropped.sources));
+    });
+
+    updateCompatibilityNote();
+    updateBundlePreview([]);
+    updateFolderPreview([]);
+    setModeMetric('Idle');
+    setBusy(true);
+
+    try {
+      window.WebLunaLib = await WebLuna({
+        print: (text) => appendLog(text, 'info'),
+        printErr: (text) => appendLog(text, 'error')
+      });
+      setBusy(false);
+      setStatus('ready', 'Luna web is ready', 'Choose files, pick a folder, or drag inputs into the dropzone.', 'Ready');
+      appendLog('Luna web runtime initialized.', 'ui');
+    }
+    catch (error) {
+      console.error(error);
+      setBusy(true);
+      setStatus('error', 'Luna failed to load', error.message || 'Check the browser console for details.', 'Error');
+      appendLog(error.message || 'Luna web runtime failed to initialize.', 'error');
+    }
+  </script>
 </body>
+
 </html>

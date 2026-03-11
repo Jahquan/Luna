@@ -1,3 +1,11 @@
 *.o
 luna
 luna.exe
+dist/
+.serena/
+.DS_Store
+emscripten/*.bc
+emscripten/WebLuna.js
+emscripten/WebLuna.js.map
+emscripten/WebLuna.wasm
+emscripten/WebLuna.wasm.map
