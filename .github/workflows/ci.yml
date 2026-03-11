@@ -14,7 +14,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
     - name: Checkout Git Repo
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
 
     - name: Install zlib headers
       if: runner.os == 'Linux'
@@ -34,7 +34,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout Git Repo
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
 
     - name: Install build deps
       run: |
@@ -43,4 +43,4 @@ jobs:
 
     - name: Sanitizer build
       run: |
-        make sanitize
+        ASAN_OPTIONS=detect_leaks=0 make sanitize

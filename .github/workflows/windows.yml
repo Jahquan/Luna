@@ -15,7 +15,7 @@ jobs:
       MSYSTEM: MINGW64
     steps:
     - name: Checkout Git Repo
-      uses: actions/checkout@v3
+      uses: actions/checkout@v5
 
     - name: Fixup PATH
       run: |
@@ -31,7 +31,7 @@ jobs:
         mingw32-make CC=gcc test
 
     - name: Upload zip
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
           name: luna-win64
           path: "luna.exe"

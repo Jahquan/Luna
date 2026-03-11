@@ -75,16 +75,17 @@ This fork keeps Luna's core conversion behavior intact while modernizing the pro
 
 ## Usage
 
-* Single-file conversion:    `luna INFILE.py` or `luna Problem1.xml`
-* Single-file with name:     `luna INFILE.py OUTFILE.tns`
-* Lua program conversion:    `luna INFILE.lua OUTFILE.tns`
-* Problem conversion:        `luna Problem1.xml OUTFILE.tns`
-* Multiple files:            `luna Document.xml Problem1.xml [Problem2.xml...] OUTFILE.tns`
-* Python conversion:         `luna InFile1.py [InFile2.py...] OUTFILE.tns`
-* Recursive Python folders:  `luna worksheets/`
-* Help / version:            `luna --help`, `luna --version`
+* Single-file conversion:    `./luna INFILE.py` or `./luna Problem1.xml`
+* Single-file with name:     `./luna INFILE.py OUTFILE.tns`
+* Lua program conversion:    `./luna INFILE.lua OUTFILE.tns`
+* Problem conversion:        `./luna Problem1.xml OUTFILE.tns`
+* Multiple files:            `./luna Document.xml Problem1.xml [Problem2.xml...] OUTFILE.tns`
+* Python conversion:         `./luna InFile1.py [InFile2.py...] OUTFILE.tns`
+* Recursive Python folders:  `./luna worksheets/`
+* Help / version:            `./luna --help`, `./luna --version`
 
 If the input is `-`, it reads the file from the standard input.  
+If you run Luna from the repo root after `make`, use `./luna ...`. If you install the binary on your `PATH`, you can drop the `./`.  
 If you only pass a single input file, Luna writes the `.tns` next to that source file. If you pass a single input plus a bare output filename like `notes.tns`, that output filename is also created next to the source file.  
 If any input path is a directory, Luna recursively converts every `.py` file it finds and writes each `.tns` next to its source file. Recursive traversal is deterministic, prints a converted/failed/skipped summary, and skips symlinked files/directories to avoid loops.  
 Make sure to encode your Lua or Problem file in UTF-8 if it contains special characters. You can also pack arbitrary files like images into the TNS.  
@@ -95,19 +96,19 @@ On success, Luna prints the final output path it wrote.
 
 ```sh
 # Single Python file, output beside the source file
-luna ~/Desktop/notes.py
+./luna ~/Desktop/notes.py
 
 # Single Python file, explicit name still written beside the source file
-luna ~/Desktop/notes.py notes.tns
+./luna ~/Desktop/notes.py notes.tns
 
 # Multiple Python files into one document
-luna main.py helper.py lesson.tns
+./luna main.py helper.py lesson.tns
 
 # Recursive in-place Python conversion
-luna worksheets/
+./luna worksheets/
 
 # XML problem/document bundle with a BMP resource
-luna Document.xml Problem1.xml image.bmp worksheet.tns
+./luna Document.xml Problem1.xml image.bmp worksheet.tns
 
 # Build and serve the browser UI locally
 source ~/Downloads/emsdk/emsdk_env.sh
@@ -129,7 +130,7 @@ Luna includes cryptographic software written by Eric Young (eay@cryptsoft.com), 
 ## Building it yourself
 
 You need the zlib (zlib1g-dev/zlib-devel) development library. On macOS, you can use [brew](http://brew.sh/): `brew install zlib`  
-Then you can just run `make`.  
+Then you can just run `make`. The locally built binary is `./luna`.  
 The XML parser is vendored from Expat 2.7.4 under `third_party/expat`, so there is no extra system XML dependency to install.
 
 Run `make test` to execute the regression checks.

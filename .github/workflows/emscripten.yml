@@ -9,21 +9,25 @@ on:
 jobs:
   build-web:
     runs-on: ubuntu-latest
+    env:
+      EMSDK_VERSION: 5.0.2
     steps:
     - name: Checkout Git Repo
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
 
     - name: Install Emscripten SDK
       shell: bash
       run: |
         git clone --depth 1 https://github.com/emscripten-core/emsdk.git "$RUNNER_TEMP/emsdk"
-        "$RUNNER_TEMP/emsdk/emsdk" install latest
-        "$RUNNER_TEMP/emsdk/emsdk" activate latest
+        "$RUNNER_TEMP/emsdk/emsdk" install "$EMSDK_VERSION"
+        "$RUNNER_TEMP/emsdk/emsdk" activate "$EMSDK_VERSION"
 
     - name: Build web bundle
       shell: bash
       run: |
         source "$RUNNER_TEMP/emsdk/emsdk_env.sh"
+        emcc --version
+        make -C emscripten clean
         make -C emscripten
         test -f emscripten/WebLuna.js
 
